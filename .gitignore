@@ -6,7 +6,6 @@
 *.dll
 *.so
 *.dylib
-gocache
 
 # Test binary, built with `go test -c`
 *.test
@@ -152,8 +151,8 @@ yarn-error.log*
 *~
 
 # Project-specific ignores
-# Ignore the compiled binary (already covered above, but explicit)
-gocache
+# Ignore the compiled binary
+/gocache
 
 # Ignore any local test certificates
 test-certs/
@@ -162,8 +161,3 @@ test-ca/
 # Ignore any local cache files
 local-cache/
 
-# misc
-GEMINI.md
-IMPLEMENTATION_PLAN.md
-PRD.md
-TASKS.md
