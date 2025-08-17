@@ -4,7 +4,14 @@ control_port = 8081
 bind_address = "127.0.0.1"
 
 [cache]
+# Normal cache TTL for successful responses (2xx, 3xx)
 default_ttl = "1h"
+
+# Negative TTL for error responses (4xx, 5xx)
+# This allows errors to be cached briefly to reduce upstream load
+# but expire quickly in case the error is temporary
+negative_ttl = "10s"
+
 max_size_mb = 500
 ignore_no_cache = false
 cacheable_types = [

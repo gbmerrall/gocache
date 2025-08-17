@@ -99,6 +99,11 @@ func getCacheKey(r *http.Request) string {
 	return u.String()
 }
 
+// isErrorStatusCode returns true if the status code is 4xx or 5xx
+func isErrorStatusCode(statusCode int) bool {
+	return statusCode >= 400 && statusCode <= 599
+}
+
 // shouldCacheResponse determines if a response should be cached.
 func (p *Proxy) shouldCacheResponse(resp *http.Response) bool {
 	contentType := resp.Header.Get("Content-Type")
@@ -187,9 +192,18 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			Headers:    resp.Header,
 			Body:       body,
 		}
-		p.cache.Set(cacheKey, entry)
-		p.logger.Info("response cached", "key", cacheKey)
-		p.logger.Debug("cached response details", "statusCode", resp.StatusCode, "contentType", resp.Header.Get("Content-Type"), "bodySize", len(body))
+		
+		// Use negative TTL for error status codes (4xx, 5xx)
+		if isErrorStatusCode(resp.StatusCode) {
+			negativeTTL := p.config.Cache.GetNegativeTTL()
+			p.cache.SetWithTTL(cacheKey, entry, negativeTTL)
+			p.logger.Info("response cached with negative TTL", "key", cacheKey, "ttl", negativeTTL)
+			p.logger.Debug("cached error response details", "statusCode", resp.StatusCode, "contentType", resp.Header.Get("Content-Type"), "bodySize", len(body), "negativeTTL", negativeTTL)
+		} else {
+			p.cache.Set(cacheKey, entry)
+			p.logger.Info("response cached", "key", cacheKey)
+			p.logger.Debug("cached response details", "statusCode", resp.StatusCode, "contentType", resp.Header.Get("Content-Type"), "bodySize", len(body))
+		}
 	} else {
 		p.logger.Debug("response not cached", "key", cacheKey, "statusCode", resp.StatusCode)
 	}
@@ -299,8 +313,18 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			Headers:    resp.Header,
 			Body:       body,
 		}
-		p.cache.Set(cacheKey, entry)
-		p.logger.Info("response cached (https)", "key", cacheKey)
+		
+		// Use negative TTL for error status codes (4xx, 5xx)
+		if isErrorStatusCode(resp.StatusCode) {
+			negativeTTL := p.config.Cache.GetNegativeTTL()
+			p.cache.SetWithTTL(cacheKey, entry, negativeTTL)
+			p.logger.Info("response cached with negative TTL (https)", "key", cacheKey, "ttl", negativeTTL)
+			p.logger.Debug("cached error response details (https)", "statusCode", resp.StatusCode, "contentType", resp.Header.Get("Content-Type"), "bodySize", len(body), "negativeTTL", negativeTTL)
+		} else {
+			p.cache.Set(cacheKey, entry)
+			p.logger.Info("response cached (https)", "key", cacheKey)
+			p.logger.Debug("cached response details (https)", "statusCode", resp.StatusCode, "contentType", resp.Header.Get("Content-Type"), "bodySize", len(body))
+		}
 	}
 
 	resp.Header.Set("X-Cache", "MISS")

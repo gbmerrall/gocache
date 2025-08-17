@@ -125,7 +125,7 @@ func startServer(configPath, logLevelOverride string, testShutdown ...func()) {
 		logger.Debug("persistence disabled")
 	}
 
-	logger.Debug("creating proxy server", "cacheableTypes", cfg.Cache.CacheableTypes, "ignoreNoCache", cfg.Cache.IgnoreNoCache)
+	logger.Debug("creating proxy server", "cacheableTypes", cfg.Cache.CacheableTypes, "ignoreNoCache", cfg.Cache.IgnoreNoCache, "negativeTTL", cfg.Cache.GetNegativeTTL())
 	p, err := proxy.NewProxy(logger, c, cfg)
 	if err != nil {
 		logger.Error("failed to create proxy", "error", err)

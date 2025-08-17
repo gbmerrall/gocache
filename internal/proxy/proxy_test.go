@@ -3,6 +3,7 @@ package proxy
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -586,5 +587,166 @@ func TestXCacheHeader(t *testing.T) {
 			t.Errorf("got X-Cache %q, want %q", resp.Header.Get("X-Cache"), "HIT")
 		}
 		resp.Body.Close()
+	})
+}
+
+func TestNegativeTTL(t *testing.T) {
+	t.Run("Error status codes use negative TTL", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "gocache-test-negative-ttl")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		cert.SetCertDir(tmpDir)
+		
+		// Configure with very short negative TTL for testing
+		cfg := config.NewDefaultConfig()
+		cfg.Cache.DefaultTTL = "1h"
+		cfg.Cache.NegativeTTL = "50ms" // Very short for testing
+		
+		c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		
+		p, err := NewProxy(logger, c, cfg)
+		if err != nil {
+			t.Fatalf("failed to create proxy: %v", err)
+		}
+
+		// Create test server that returns 404
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			http.Error(w, "Not Found", http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		// First request - should cache with negative TTL
+		req1, _ := http.NewRequest("GET", server.URL, nil)
+		w1 := httptest.NewRecorder()
+		p.ServeHTTP(w1, req1)
+
+		if w1.Code != http.StatusNotFound {
+			t.Errorf("expected 404, got %d", w1.Code)
+		}
+
+		// Check that response was cached
+		cacheKey := getCacheKey(req1)
+		cached, found := c.Get(cacheKey)
+		if !found {
+			t.Error("expected 404 response to be cached")
+		}
+		if cached.StatusCode != http.StatusNotFound {
+			t.Errorf("cached response has wrong status: %d", cached.StatusCode)
+		}
+
+		// Immediately make second request - should be cache hit
+		req2, _ := http.NewRequest("GET", server.URL, nil)
+		w2 := httptest.NewRecorder()
+		p.ServeHTTP(w2, req2)
+
+		if w2.Code != http.StatusNotFound {
+			t.Errorf("expected 404, got %d", w2.Code)
+		}
+
+		// Wait for negative TTL to expire
+		time.Sleep(100 * time.Millisecond)
+
+		// Third request - should be cache miss due to expiration
+		req3, _ := http.NewRequest("GET", server.URL, nil)
+		w3 := httptest.NewRecorder()
+		p.ServeHTTP(w3, req3)
+
+		if w3.Code != http.StatusNotFound {
+			t.Errorf("expected 404, got %d", w3.Code)
+		}
+	})
+
+	t.Run("Success status codes use default TTL", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "gocache-test-default-ttl")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		cert.SetCertDir(tmpDir)
+		
+		// Configure with very short negative TTL but longer default TTL
+		cfg := config.NewDefaultConfig()
+		cfg.Cache.DefaultTTL = "200ms" // Short for testing but longer than negative
+		cfg.Cache.NegativeTTL = "50ms"
+		
+		c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		
+		p, err := NewProxy(logger, c, cfg)
+		if err != nil {
+			t.Fatalf("failed to create proxy: %v", err)
+		}
+
+		// Create test server that returns 200 OK
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte("Success"))
+		}))
+		defer server.Close()
+
+		// First request - should cache with default TTL
+		req1, _ := http.NewRequest("GET", server.URL, nil)
+		w1 := httptest.NewRecorder()
+		p.ServeHTTP(w1, req1)
+
+		if w1.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", w1.Code)
+		}
+
+		// Wait past negative TTL but not past default TTL
+		time.Sleep(100 * time.Millisecond)
+
+		// Second request - should still be cache hit
+		req2, _ := http.NewRequest("GET", server.URL, nil)
+		w2 := httptest.NewRecorder()
+		p.ServeHTTP(w2, req2)
+
+		if w2.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", w2.Code)
+		}
+
+		// Verify still cached
+		cacheKey := getCacheKey(req1)
+		_, found := c.Get(cacheKey)
+		if !found {
+			t.Error("expected 200 response to still be cached")
+		}
+	})
+
+	t.Run("isErrorStatusCode function", func(t *testing.T) {
+		tests := []struct {
+			statusCode int
+			expected   bool
+		}{
+			{200, false}, // 2xx - success
+			{201, false},
+			{301, false}, // 3xx - redirect  
+			{302, false},
+			{400, true},  // 4xx - client error
+			{401, true},
+			{404, true},
+			{403, true},
+			{500, true},  // 5xx - server error
+			{501, true},
+			{502, true},
+			{503, true},
+			{100, false}, // 1xx - informational
+			{101, false},
+		}
+
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("status_%d", tt.statusCode), func(t *testing.T) {
+				result := isErrorStatusCode(tt.statusCode)
+				if result != tt.expected {
+					t.Errorf("isErrorStatusCode(%d) = %v, want %v", tt.statusCode, result, tt.expected)
+				}
+			})
+		}
 	})
 }

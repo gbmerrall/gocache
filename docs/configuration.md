@@ -26,6 +26,7 @@ bind_address = "127.0.0.1"
 
 [cache]
 default_ttl = "1h"
+negative_ttl = "10s"
 max_size_mb = 500
 ignore_no_cache = false
 cacheable_types = [
@@ -59,6 +60,7 @@ auto_save_interval = "5m"
 | Key               | Type           | Default                                                              | Description                                                                                                                               |
 | ----------------- | -------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `default_ttl`     | String         | "1h"                                                                 | The default time-to-live for cached items (e.g., "30m", "1h", "24h").                                                                     |
+| `negative_ttl`    | String         | "10s"                                                                | The time-to-live for error responses (4xx/5xx status codes). Should be shorter than default_ttl to allow quick recovery from temporary errors. |
 | `max_size_mb`     | Integer        | 500                                                                  | The maximum size of the cache in megabytes.                                                                                               |
 | `ignore_no_cache` | Boolean        | false                                                                | If `true`, GoCache will cache responses even if they have `Cache-Control: no-cache` or `Pragma: no-cache` headers.                        |
 | `cacheable_types` | Array of Strings | `["text/html", "text/css", "application/javascript", "application/json", "text/plain"]` | A list of `Content-Type` values that are eligible for caching.                                                                    |

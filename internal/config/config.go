@@ -24,6 +24,7 @@ type ServerConfig struct {
 
 type CacheConfig struct {
 	DefaultTTL     string   `toml:"default_ttl"`
+	NegativeTTL    string   `toml:"negative_ttl"`
 	MaxSizeMB      int      `toml:"max_size_mb"`
 	IgnoreNoCache  bool     `toml:"ignore_no_cache"`
 	CacheableTypes []string `toml:"cacheable_types"`
@@ -48,6 +49,14 @@ func (c *CacheConfig) GetDefaultTTL() time.Duration {
 	return d
 }
 
+func (c *CacheConfig) GetNegativeTTL() time.Duration {
+	d, err := time.ParseDuration(c.NegativeTTL)
+	if err != nil {
+		return 10 * time.Second
+	}
+	return d
+}
+
 func (p *PersistenceConfig) GetAutoSaveInterval() time.Duration {
 	d, err := time.ParseDuration(p.AutoSaveInterval)
 	if err != nil {
@@ -67,9 +76,10 @@ func NewDefaultConfig() *Config {
 			BindAddress: "127.0.0.1",
 		},
 		Cache: CacheConfig{
-			DefaultTTL:    "1h",
-			MaxSizeMB:     500,
-			IgnoreNoCache: false,
+			DefaultTTL:     "1h",
+			NegativeTTL:    "10s",
+			MaxSizeMB:      500,
+			IgnoreNoCache:  false,
 			CacheableTypes: []string{
 				"text/html",
 				"text/css",
