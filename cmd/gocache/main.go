@@ -113,17 +113,25 @@ func startServer(configPath, logLevelOverride string, testShutdown ...func()) {
 	defer pidfile.Remove()
 
 	c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL())
+	logger.Debug("memory cache created", "defaultTTL", cfg.Cache.GetDefaultTTL())
 	if cfg.Persistence.Enable {
+		logger.Debug("persistence enabled, loading cache from file", "file", cfg.Persistence.CacheFile)
 		if err := c.LoadFromFile(cfg.Persistence.CacheFile); err != nil && !os.IsNotExist(err) {
 			logger.Warn("failed to load cache from file", "error", err)
+		} else if err == nil {
+			logger.Debug("cache loaded successfully from file", "file", cfg.Persistence.CacheFile)
 		}
+	} else {
+		logger.Debug("persistence disabled")
 	}
 
+	logger.Debug("creating proxy server", "cacheableTypes", cfg.Cache.CacheableTypes, "ignoreNoCache", cfg.Cache.IgnoreNoCache)
 	p, err := proxy.NewProxy(logger, c, cfg)
 	if err != nil {
 		logger.Error("failed to create proxy", "error", err)
 		exit(1)
 	}
+	logger.Debug("proxy server created successfully")
 
 	shutdown := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -143,6 +151,7 @@ func startServer(configPath, logLevelOverride string, testShutdown ...func()) {
 		}
 	}
 
+	logger.Debug("creating control API", "bindAddress", cfg.Server.BindAddress, "controlPort", cfg.Server.ControlPort)
 	controlAPI := control.NewControlAPI(logger, cfg, c, p, shutdown)
 	go func() {
 		if err := controlAPI.Start(); err != nil && err != http.ErrServerClosed {
@@ -155,6 +164,7 @@ func startServer(configPath, logLevelOverride string, testShutdown ...func()) {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.BindAddress, cfg.Server.ProxyPort)
 	logger.Info("GoCache starting", "address", addr)
+	logger.Debug("server configuration", "proxyPort", cfg.Server.ProxyPort, "controlPort", cfg.Server.ControlPort, "logLevel", logLevelStr)
 
 	if err := p.Start(addr); err != nil && err != http.ErrServerClosed {
 		logger.Error("proxy failed", "error", err)

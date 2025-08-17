@@ -128,6 +128,7 @@ func (a *ControlAPI) handleStats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	a.logger.Debug("stats endpoint accessed", "remoteAddr", r.RemoteAddr)
 	stats := a.cache.GetStats()
 	totalRequests := stats.Hits + stats.Misses
 	var hitRate float64
@@ -154,6 +155,7 @@ func (a *ControlAPI) handlePurgeAll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	a.logger.Debug("purge all endpoint accessed", "remoteAddr", r.RemoteAddr)
 	count := a.cache.PurgeAll()
 	a.logger.Info("purged all cache entries", "count", count)
 	w.Header().Set("Content-Type", "application/json")
@@ -184,6 +186,7 @@ func (a *ControlAPI) handlePurgeURL(w http.ResponseWriter, r *http.Request) {
 	}
 	found := a.cache.PurgeByURL(req.URL)
 	a.logger.Info("purge request by URL", "url", req.URL, "found", found)
+	a.logger.Debug("purge by URL details", "url", req.URL, "found", found, "remoteAddr", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"url":    req.URL,
@@ -205,6 +208,7 @@ func (a *ControlAPI) handlePurgeDomain(w http.ResponseWriter, r *http.Request) {
 	}
 	count := a.cache.PurgeByDomain(domain)
 	a.logger.Info("purged cache entries by domain", "domain", domain, "count", count)
+	a.logger.Debug("purge by domain details", "domain", domain, "count", count, "remoteAddr", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"domain":       domain,

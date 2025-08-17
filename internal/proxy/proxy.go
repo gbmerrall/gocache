@@ -141,10 +141,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	p.logger.Info("http request", "method", r.Method, "url", r.URL)
+	p.logger.Debug("http request details", "headers", r.Header, "contentLength", r.ContentLength)
 	cacheKey := getCacheKey(r)
 
 	if entry, ok := p.cache.Get(cacheKey); ok {
 		p.logger.Info("cache hit", "key", cacheKey)
+		p.logger.Debug("serving cached response", "statusCode", entry.StatusCode, "bodySize", len(entry.Body))
 		w.Header().Set("X-Cache", "HIT")
 		for key, values := range entry.Headers {
 			for _, value := range values {
@@ -157,6 +159,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.logger.Info("cache miss", "key", cacheKey)
+	p.logger.Debug("forwarding request to upstream", "url", r.URL.String())
 
 	r.RequestURI = ""
 	r.Header.Del("Proxy-Connection")
@@ -165,6 +168,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := p.transport.RoundTrip(r)
 	if err != nil {
 		p.logger.Error("failed to forward http request", "error", err)
+		p.logger.Debug("upstream request failed", "url", r.URL.String(), "error", err)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -185,6 +189,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		p.cache.Set(cacheKey, entry)
 		p.logger.Info("response cached", "key", cacheKey)
+		p.logger.Debug("cached response details", "statusCode", resp.StatusCode, "contentType", resp.Header.Get("Content-Type"), "bodySize", len(body))
+	} else {
+		p.logger.Debug("response not cached", "key", cacheKey, "statusCode", resp.StatusCode)
 	}
 
 	for key, values := range resp.Header {
@@ -199,6 +206,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	p.logger.Info("https request", "host", r.Host)
+	p.logger.Debug("https connect request details", "method", r.Method, "host", r.Host, "userAgent", r.Header.Get("User-Agent"))
 
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
@@ -224,6 +232,7 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	tlsCert, err := p.getCert(r.Host)
 	if err != nil {
 		p.logger.Error("failed to get certificate", "host", r.Host, "error", err)
+		p.logger.Debug("certificate generation failed", "host", r.Host, "error", err)
 		return
 	}
 
@@ -246,6 +255,7 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 
 	if entry, ok := p.cache.Get(cacheKey); ok {
 		p.logger.Info("cache hit (https)", "key", cacheKey)
+		p.logger.Debug("serving cached https response", "statusCode", entry.StatusCode, "bodySize", len(entry.Body))
 		entry.Headers.Set("X-Cache", "HIT")
 		cachedResp := http.Response{
 			StatusCode: entry.StatusCode,
@@ -259,10 +269,12 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.logger.Info("cache miss (https)", "key", cacheKey)
+	p.logger.Debug("forwarding https request to upstream", "url", req.URL.String())
 
 	resp, err := p.transport.RoundTrip(req)
 	if err != nil {
 		p.logger.Error("failed to forward https request", "error", err)
+		p.logger.Debug("upstream https request failed", "url", req.URL.String(), "error", err)
 		errorResponse := &http.Response{
 			StatusCode: http.StatusBadGateway,
 			Proto:      "HTTP/1.1",
@@ -310,9 +322,11 @@ func (p *Proxy) getCert(host string) (*tls.Certificate, error) {
 	p.certCacheMu.RLock()
 	if cert, ok := p.certCache[host]; ok {
 		p.certCacheMu.RUnlock()
+		p.logger.Debug("certificate cache hit", "host", host)
 		return cert, nil
 	}
 	p.certCacheMu.RUnlock()
+	p.logger.Debug("certificate cache miss, generating new cert", "host", host)
 
 	p.certCacheMu.Lock()
 	defer p.certCacheMu.Unlock()
@@ -322,14 +336,17 @@ func (p *Proxy) getCert(host string) (*tls.Certificate, error) {
 
 	hostCert, hostKey, err := cert.GenerateHostCert(p.ca, p.caPrivKey, host)
 	if err != nil {
+		p.logger.Debug("certificate generation failed", "host", host, "error", err)
 		return nil, err
 	}
+	p.logger.Debug("certificate generated successfully", "host", host, "serialNumber", hostCert.SerialNumber)
 
 	tlsCert := &tls.Certificate{
 		Certificate: [][]byte{hostCert.Raw},
 		PrivateKey:  hostKey,
 	}
 	p.certCache[host] = tlsCert
+	p.logger.Debug("certificate cached", "host", host, "cacheSize", len(p.certCache))
 	return tlsCert, nil
 }
 
