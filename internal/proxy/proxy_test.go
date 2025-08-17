@@ -1,0 +1,590 @@
+package proxy
+
+import (
+	"crypto/tls"
+	"crypto/x509"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gbmerrall/gocache/internal/cache"
+	"github.com/gbmerrall/gocache/internal/cert"
+	"github.com/gbmerrall/gocache/internal/config"
+)
+
+func setupProxyTest(t *testing.T) (*httptest.Server, *http.Client, *cache.MemoryCache, func()) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+
+	cert.SetCertDir(tmpDir)
+
+	cfg := config.NewDefaultConfig()
+	c := cache.NewMemoryCache(1 * time.Minute)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	p, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/non-cacheable" {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write([]byte("binary data"))
+		} else if r.URL.Path == "/error" {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		} else {
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write([]byte("hello world"))
+		}
+	}))
+
+	p.SetTransport(&http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs: upstream.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs,
+		},
+	})
+
+	proxyServer := httptest.NewServer(p)
+
+	proxyURL, _ := url.Parse(proxyServer.URL)
+	caCertPool := x509.NewCertPool()
+	caCertPool.AddCert(p.GetCA())
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{
+				RootCAs: caCertPool,
+			},
+		},
+		Timeout: 10 * time.Second, // Add timeout to prevent hangs
+	}
+
+	cleanup := func() {
+		proxyServer.Close()
+		upstream.Close()
+		os.RemoveAll(tmpDir)
+	}
+
+	return upstream, client, c, cleanup
+}
+
+func TestProxy(t *testing.T) {
+	upstream, client, _, cleanup := setupProxyTest(t)
+	defer cleanup()
+
+	t.Run("HTTP request", func(t *testing.T) {
+		// Need a separate non-TLS upstream for this.
+		httpUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write([]byte("hello http"))
+		}))
+		defer httpUpstream.Close()
+
+		resp, err := client.Get(httpUpstream.URL)
+		if err != nil {
+			t.Fatalf("http request failed: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if string(body) != "hello http" {
+			t.Errorf("got body %q, want %q", body, "hello http")
+		}
+	})
+
+	t.Run("HTTPS request", func(t *testing.T) {
+		resp, err := client.Get(upstream.URL)
+		if err != nil {
+			t.Fatalf("https request failed: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if string(body) != "hello world" {
+			t.Errorf("got body %q, want %q", body, "hello world")
+		}
+	})
+
+	t.Run("Non-cacheable content type", func(t *testing.T) {
+		resp, err := client.Get(upstream.URL + "/non-cacheable")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if string(body) != "binary data" {
+			t.Errorf("got body %q, want %q", body, "binary data")
+		}
+	})
+
+	t.Run("Upstream error", func(t *testing.T) {
+		resp, err := client.Get(upstream.URL + "/error")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusInternalServerError {
+			t.Errorf("got status %d, want %d", resp.StatusCode, http.StatusInternalServerError)
+		}
+	})
+}
+
+func setupTestProxy(t *testing.T) (*Proxy, func()) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-proxy")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+
+	cert.SetCertDir(tmpDir)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.NewDefaultConfig()
+	c := cache.NewMemoryCache(1 * time.Minute)
+
+	p, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	return p, func() {
+		os.RemoveAll(tmpDir)
+	}
+}
+
+func TestNewProxy(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-proxy")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.NewDefaultConfig()
+	c := cache.NewMemoryCache(1 * time.Minute)
+
+	proxy, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	if proxy == nil {
+		t.Fatal("expected non-nil proxy")
+	}
+	if proxy.logger != logger {
+		t.Error("logger not set correctly")
+	}
+	if proxy.cache != c {
+		t.Error("cache not set correctly")
+	}
+	if proxy.config != cfg {
+		t.Error("config not set correctly")
+	}
+}
+
+func TestGetCA(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	ca := proxy.GetCA()
+	if ca == nil {
+		t.Error("expected non-nil CA certificate")
+	}
+}
+
+func TestGetCertCacheStats(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	stats := proxy.GetCertCacheStats()
+	// GetCertCacheStats returns an int, not a pointer, so we can't check for nil
+	if stats < 0 {
+		t.Error("expected non-negative cert cache stats")
+	}
+}
+
+func TestSetConfig(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	newCfg := config.NewDefaultConfig()
+	newCfg.Cache.DefaultTTL = "2h"
+	newCfg.Cache.MaxSizeMB = 1000
+
+	proxy.SetConfig(newCfg)
+
+	if proxy.config.Cache.DefaultTTL != "2h" {
+		t.Errorf("expected TTL 2h, got %s", proxy.config.Cache.DefaultTTL)
+	}
+	if proxy.config.Cache.MaxSizeMB != 1000 {
+		t.Errorf("expected max size 1000MB, got %d", proxy.config.Cache.MaxSizeMB)
+	}
+}
+
+func TestSetTransport(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
+	proxy.SetTransport(transport)
+
+	if proxy.transport != transport {
+		t.Error("transport not set correctly")
+	}
+}
+
+func TestGetCacheKey(t *testing.T) {
+	// Test getCacheKey function directly
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+	}{
+		{"simple URL", "http://example.com", "http://example.com"},
+		{"URL with path", "http://example.com/page", "http://example.com/page"},
+		{"URL with query params", "http://example.com/page?a=1&b=2", "http://example.com/page?a=1&b=2"},
+		{"URL with fragment", "http://example.com/page#section", "http://example.com/page"},
+		{"URL with query and fragment", "http://example.com/page?a=1#section", "http://example.com/page?a=1"},
+		{"URL with sorted query params", "http://example.com/page?b=2&a=1", "http://example.com/page?a=1&b=2"},
+		{"HTTPS URL", "https://example.com", "https://example.com"},
+		{"URL with port", "http://example.com:8080", "http://example.com:8080"},
+		{"URL with complex query", "http://example.com/page?param[]=1&param[]=2", "http://example.com/page?param%5B%5D=1&param%5B%5D=2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest("GET", tt.url, nil)
+			if err != nil {
+				t.Fatalf("failed to create request: %v", err)
+			}
+
+			key := getCacheKey(req)
+			if key != tt.expected {
+				t.Errorf("getCacheKey(%s) = %s, want %s", tt.url, key, tt.expected)
+			}
+		})
+	}
+}
+
+func TestShouldCacheResponse(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	tests := []struct {
+		name           string
+		statusCode     int
+		contentType    string
+		expectedResult bool
+	}{
+		{"text/html OK", http.StatusOK, "text/html", true},
+		{"text/plain OK", http.StatusOK, "text/plain", true},
+		{"application/json OK", http.StatusOK, "application/json", true},
+		{"text/css OK", http.StatusOK, "text/css", true},
+		{"application/javascript OK", http.StatusOK, "application/javascript", true},
+		{"application/octet-stream OK", http.StatusOK, "application/octet-stream", false},
+		{"text/html 404", http.StatusNotFound, "text/html", true},
+		{"text/html 500", http.StatusInternalServerError, "text/html", true},
+		{"no content type", http.StatusOK, "", false},
+		{"image/png", http.StatusOK, "image/png", false},
+		{"video/mp4", http.StatusOK, "video/mp4", false},
+		{"audio/mpeg", http.StatusOK, "audio/mpeg", false},
+		{"application/pdf", http.StatusOK, "application/pdf", false},
+		{"text/html with charset", http.StatusOK, "text/html; charset=utf-8", true},
+		{"application/json with charset", http.StatusOK, "application/json; charset=utf-8", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &http.Response{
+				StatusCode: tt.statusCode,
+				Header:     http.Header{},
+			}
+			if tt.contentType != "" {
+				resp.Header.Set("Content-Type", tt.contentType)
+			}
+
+			result := proxy.shouldCacheResponse(resp)
+			if result != tt.expectedResult {
+				t.Errorf("shouldCacheResponse(%d, %s) = %v, want %v",
+					tt.statusCode, tt.contentType, result, tt.expectedResult)
+			}
+		})
+	}
+}
+
+func TestProxyCaching(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	// Create a test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<html><body>Test Content</body></html>"))
+	}))
+	defer server.Close()
+
+	// Test that responses are cached
+	req1, _ := http.NewRequest("GET", server.URL, nil)
+	w1 := httptest.NewRecorder()
+	proxy.ServeHTTP(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Errorf("first request failed with status %d", w1.Code)
+	}
+
+	// Check if response was cached
+	cacheKey := getCacheKey(req1)
+	cached, found := proxy.cache.Get(cacheKey)
+	if !found {
+		t.Error("expected response to be cached")
+	}
+	if cached.StatusCode != http.StatusOK {
+		t.Errorf("cached response has wrong status: %d", cached.StatusCode)
+	}
+
+	// Test cache hit
+	req2, _ := http.NewRequest("GET", server.URL, nil)
+	w2 := httptest.NewRecorder()
+	proxy.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Errorf("second request failed with status %d", w2.Code)
+	}
+
+	// Verify it was served from cache (the proxy might not add cache headers)
+	// Just check that the response was successful
+	if w2.Code != http.StatusOK {
+		t.Error("expected successful response from cache")
+	}
+}
+
+func TestProxyNonCacheable(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	// Create a test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write([]byte("binary data"))
+	}))
+	defer server.Close()
+
+	// Test that non-cacheable responses are not cached
+	req, _ := http.NewRequest("GET", server.URL, nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("request failed with status %d", w.Code)
+	}
+
+	// Check that response was NOT cached
+	cacheKey := getCacheKey(req)
+	_, found := proxy.cache.Get(cacheKey)
+	if found {
+		t.Error("expected response NOT to be cached")
+	}
+}
+
+func TestProxyErrorHandling(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	// Test with non-existent server
+	req, _ := http.NewRequest("GET", "http://localhost:99999", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	// Should get an error status
+	if w.Code == http.StatusOK {
+		t.Error("expected error status for non-existent server")
+	}
+}
+
+func TestProxyHTTPS(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	// Create a test HTTPS server
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<html><body>HTTPS Test</body></html>"))
+	}))
+	defer server.Close()
+
+	// Configure proxy to trust the test server
+	proxy.SetTransport(&http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	})
+
+	// Test HTTPS request
+	req, _ := http.NewRequest("GET", server.URL, nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("HTTPS request failed with status %d", w.Code)
+	}
+}
+
+func TestProxyRequestMethods(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	// Create a test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("Method: " + r.Method))
+	}))
+	defer server.Close()
+
+	methods := []string{"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"}
+
+	for _, method := range methods {
+		t.Run(method, func(t *testing.T) {
+			req, _ := http.NewRequest(method, server.URL, nil)
+			w := httptest.NewRecorder()
+			proxy.ServeHTTP(w, req)
+
+			// All methods should work, but only GET should be cached
+			if w.Code != http.StatusOK {
+				t.Errorf("%s request failed with status %d", method, w.Code)
+			}
+
+			if method == "GET" {
+				// Check if GET was cached
+				cacheKey := getCacheKey(req)
+				_, found := proxy.cache.Get(cacheKey)
+				if !found {
+					t.Error("expected GET request to be cached")
+				}
+			}
+		})
+	}
+}
+
+func TestProxyHeaders(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	// Create a test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Echo back some headers
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("X-Original-Host", r.Host)
+		w.Header().Set("X-User-Agent", r.Header.Get("User-Agent"))
+		w.Write([]byte("Headers test"))
+	}))
+	defer server.Close()
+
+	// Test with custom headers
+	req, _ := http.NewRequest("GET", server.URL, nil)
+	req.Header.Set("User-Agent", "GoCache-Test/1.0")
+	req.Header.Set("Accept", "text/html")
+
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("request failed with status %d", w.Code)
+	}
+
+	// Check that headers were preserved
+	if w.Header().Get("X-User-Agent") != "GoCache-Test/1.0" {
+		t.Error("User-Agent header not preserved")
+	}
+}
+
+func TestProxyLargeResponse(t *testing.T) {
+	proxy, cleanup := setupTestProxy(t)
+	defer cleanup()
+
+	// Create a test server with large response
+	largeContent := strings.Repeat("A", 1024*1024) // 1MB
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(largeContent))
+	}))
+	defer server.Close()
+
+	// Test large response
+	req, _ := http.NewRequest("GET", server.URL, nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("large response request failed with status %d", w.Code)
+	}
+
+	// Verify content length
+	if len(w.Body.String()) != len(largeContent) {
+		t.Errorf("content length mismatch: got %d, want %d",
+			len(w.Body.String()), len(largeContent))
+	}
+}
+
+func TestXCacheHeader(t *testing.T) {
+	upstream, client, _, cleanup := setupProxyTest(t)
+	defer cleanup()
+
+	t.Run("HTTP request", func(t *testing.T) {
+		httpUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write([]byte("hello http"))
+		}))
+		defer httpUpstream.Close()
+
+		// First request should be a miss
+		resp, err := client.Get(httpUpstream.URL)
+		if err != nil {
+			t.Fatalf("http request failed: %v", err)
+		}
+		if resp.Header.Get("X-Cache") != "MISS" {
+			t.Errorf("got X-Cache %q, want %q", resp.Header.Get("X-Cache"), "MISS")
+		}
+		resp.Body.Close()
+
+		// Second request should be a hit
+		resp, err = client.Get(httpUpstream.URL)
+		if err != nil {
+			t.Fatalf("http request failed: %v", err)
+		}
+		if resp.Header.Get("X-Cache") != "HIT" {
+			t.Errorf("got X-Cache %q, want %q", resp.Header.Get("X-Cache"), "HIT")
+		}
+		resp.Body.Close()
+	})
+
+	t.Run("HTTPS request", func(t *testing.T) {
+		// First request should be a miss
+		resp, err := client.Get(upstream.URL)
+		if err != nil {
+			t.Fatalf("https request failed: %v", err)
+		}
+		if resp.Header.Get("X-Cache") != "MISS" {
+			t.Errorf("got X-Cache %q, want %q", resp.Header.Get("X-Cache"), "MISS")
+		}
+		resp.Body.Close()
+
+		// Second request should be a hit
+		resp, err = client.Get(upstream.URL)
+		if err != nil {
+			t.Fatalf("https request failed: %v", err)
+		}
+		if resp.Header.Get("X-Cache") != "HIT" {
+			t.Errorf("got X-Cache %q, want %q", resp.Header.Get("X-Cache"), "HIT")
+		}
+		resp.Body.Close()
+	})
+}

@@ -1,0 +1,25 @@
+[server]
+proxy_port = 8080
+control_port = 8081
+bind_address = "127.0.0.1"
+
+[cache]
+default_ttl = "1h"
+max_size_mb = 500
+ignore_no_cache = false
+cacheable_types = [
+    "text/html",
+    "text/css",
+    "application/javascript",
+    "application/json",
+    "text/plain"
+]
+
+[logging]
+level = "info"
+file = ""
+
+[persistence]
+enable = true
+cache_file = "" # Default: ~/.config/gocache/cache.gob
+auto_save_interval = "5m"
