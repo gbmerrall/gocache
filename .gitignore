@@ -1,0 +1,169 @@
+# GoCache .gitignore
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+gocache
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Cache and data directories
+.cache/
+data/
+cache/
+
+# Configuration files with sensitive data (optional - uncomment if needed)
+# *.key
+# *.pem
+# *.crt
+
+# Build artifacts
+build/
+dist/
+bin/
+
+# Coverage reports
+coverage.html
+coverage.xml
+coverage.json
+
+# Profiling data
+*.prof
+*.pprof
+
+# Benchmark results
+bench.out
+benchmark.out
+
+# Test output files (I can see these in your directory)
+control.out
+proxy.out
+cli.out
+pidfile.out
+config.out
+cert.out
+cache.out
+coverage.out
+
+# Certificate and key files (for development)
+*.key
+*.crt
+*.pem
+*.p12
+*.pfx
+
+# Configuration files that might contain sensitive data
+# Uncomment if you want to ignore config files with secrets
+# config.local.toml
+# .env
+# .env.local
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Archive files
+*.tar.gz
+*.zip
+*.rar
+
+# Documentation build artifacts
+docs/_build/
+docs/.doctrees/
+
+# Local development files
+.local/
+local/
+
+# Docker artifacts
+Dockerfile.local
+docker-compose.override.yml
+
+# Kubernetes artifacts
+*.kubeconfig
+kubeconfig
+
+# Terraform artifacts
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Node.js artifacts (if any frontend tools are used)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Backup and swap files
+*~
+*.swp
+*.swo
+*#
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Windows
+*.lnk
+
+# Linux
+*~
+
+# Project-specific ignores
+# Ignore the compiled binary (already covered above, but explicit)
+gocache
+
+# Ignore any local test certificates
+test-certs/
+test-ca/
+
+# Ignore any local cache files
+local-cache/
+
+# misc
+GEMINI.md
+IMPLEMENTATION_PLAN.md
+PRD.md
+TASKS.md
