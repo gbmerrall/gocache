@@ -104,6 +104,13 @@ func isErrorStatusCode(statusCode int) bool {
 	return statusCode >= 400 && statusCode <= 599
 }
 
+// shouldCacheRequest determines if a request should be cached based on HTTP method.
+func (p *Proxy) shouldCacheRequest(r *http.Request) bool {
+	// Only cache GET requests by default
+	// Other methods can be enabled through specific configuration
+	return r.Method == http.MethodGet
+}
+
 // shouldCacheResponse determines if a response should be cached.
 func (p *Proxy) shouldCacheResponse(resp *http.Response) bool {
 	contentType := resp.Header.Get("Content-Type")
@@ -147,24 +154,35 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	p.logger.Info("http request", "method", r.Method, "url", r.URL)
 	p.logger.Debug("http request details", "headers", r.Header, "contentLength", r.ContentLength)
-	cacheKey := getCacheKey(r)
-
-	if entry, ok := p.cache.Get(cacheKey); ok {
-		p.logger.Info("cache hit", "key", cacheKey)
-		p.logger.Debug("serving cached response", "statusCode", entry.StatusCode, "bodySize", len(entry.Body))
-		w.Header().Set("X-Cache", "HIT")
-		for key, values := range entry.Headers {
-			for _, value := range values {
-				w.Header().Add(key, value)
+	
+	// Only check cache for cacheable request methods
+	var cacheKey string
+	var fromCache bool
+	if p.shouldCacheRequest(r) {
+		cacheKey = getCacheKey(r)
+		if entry, ok := p.cache.Get(cacheKey); ok {
+			p.logger.Info("cache hit", "key", cacheKey)
+			p.logger.Debug("serving cached response", "statusCode", entry.StatusCode, "bodySize", len(entry.Body))
+			w.Header().Set("X-Cache", "HIT")
+			for key, values := range entry.Headers {
+				for _, value := range values {
+					w.Header().Add(key, value)
+				}
 			}
+			w.WriteHeader(entry.StatusCode)
+			w.Write(entry.Body)
+			return
 		}
-		w.WriteHeader(entry.StatusCode)
-		w.Write(entry.Body)
-		return
+		fromCache = false
+	} else {
+		p.logger.Debug("request method not cacheable", "method", r.Method)
 	}
 
-	p.logger.Info("cache miss", "key", cacheKey)
-	p.logger.Debug("forwarding request to upstream", "url", r.URL.String())
+	if fromCache == false && p.shouldCacheRequest(r) {
+		p.logger.Info("cache miss", "key", cacheKey)
+	} else if !p.shouldCacheRequest(r) {
+		p.logger.Debug("forwarding non-cacheable request to upstream", "method", r.Method, "url", r.URL.String())
+	}
 
 	r.RequestURI = ""
 	r.Header.Del("Proxy-Connection")
@@ -186,7 +204,8 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if p.shouldCacheResponse(resp) {
+	// Only cache responses for cacheable request methods
+	if p.shouldCacheRequest(r) && p.shouldCacheResponse(resp) {
 		entry := cache.CacheEntry{
 			StatusCode: resp.StatusCode,
 			Headers:    resp.Header,
@@ -204,8 +223,10 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			p.logger.Info("response cached", "key", cacheKey)
 			p.logger.Debug("cached response details", "statusCode", resp.StatusCode, "contentType", resp.Header.Get("Content-Type"), "bodySize", len(body))
 		}
-	} else {
+	} else if p.shouldCacheRequest(r) {
 		p.logger.Debug("response not cached", "key", cacheKey, "statusCode", resp.StatusCode)
+	} else {
+		p.logger.Debug("response not cached - method not cacheable", "method", r.Method, "statusCode", resp.StatusCode)
 	}
 
 	for key, values := range resp.Header {
@@ -213,7 +234,12 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(key, value)
 		}
 	}
-	w.Header().Set("X-Cache", "MISS")
+	
+	// Set cache header based on whether request method is cacheable
+	if p.shouldCacheRequest(r) {
+		w.Header().Set("X-Cache", "MISS")
+	}
+	
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
 }
@@ -265,25 +291,36 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 
 	req.URL.Scheme = "https"
 	req.URL.Host = r.Host
-	cacheKey := getCacheKey(req)
-
-	if entry, ok := p.cache.Get(cacheKey); ok {
-		p.logger.Info("cache hit (https)", "key", cacheKey)
-		p.logger.Debug("serving cached https response", "statusCode", entry.StatusCode, "bodySize", len(entry.Body))
-		entry.Headers.Set("X-Cache", "HIT")
-		cachedResp := http.Response{
-			StatusCode: entry.StatusCode,
-			Header:     entry.Headers,
-			Body:       io.NopCloser(bytes.NewReader(entry.Body)),
+	
+	// Only check cache for cacheable request methods
+	var cacheKey string
+	var fromCache bool
+	if p.shouldCacheRequest(req) {
+		cacheKey = getCacheKey(req)
+		if entry, ok := p.cache.Get(cacheKey); ok {
+			p.logger.Info("cache hit (https)", "key", cacheKey)
+			p.logger.Debug("serving cached https response", "statusCode", entry.StatusCode, "bodySize", len(entry.Body))
+			entry.Headers.Set("X-Cache", "HIT")
+			cachedResp := http.Response{
+				StatusCode: entry.StatusCode,
+				Header:     entry.Headers,
+				Body:       io.NopCloser(bytes.NewReader(entry.Body)),
+			}
+			if err := cachedResp.Write(tlsConn); err != nil {
+				p.logger.Error("failed to write cached https response", "error", err)
+			}
+			return
 		}
-		if err := cachedResp.Write(tlsConn); err != nil {
-			p.logger.Error("failed to write cached https response", "error", err)
-		}
-		return
+		fromCache = false
+	} else {
+		p.logger.Debug("https request method not cacheable", "method", req.Method)
 	}
 
-	p.logger.Info("cache miss (https)", "key", cacheKey)
-	p.logger.Debug("forwarding https request to upstream", "url", req.URL.String())
+	if fromCache == false && p.shouldCacheRequest(req) {
+		p.logger.Info("cache miss (https)", "key", cacheKey)
+	} else if !p.shouldCacheRequest(req) {
+		p.logger.Debug("forwarding non-cacheable https request to upstream", "method", req.Method, "url", req.URL.String())
+	}
 
 	resp, err := p.transport.RoundTrip(req)
 	if err != nil {
@@ -307,7 +344,8 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if p.shouldCacheResponse(resp) {
+	// Only cache responses for cacheable request methods
+	if p.shouldCacheRequest(req) && p.shouldCacheResponse(resp) {
 		entry := cache.CacheEntry{
 			StatusCode: resp.StatusCode,
 			Headers:    resp.Header,
@@ -325,9 +363,16 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			p.logger.Info("response cached (https)", "key", cacheKey)
 			p.logger.Debug("cached response details (https)", "statusCode", resp.StatusCode, "contentType", resp.Header.Get("Content-Type"), "bodySize", len(body))
 		}
+	} else if p.shouldCacheRequest(req) {
+		p.logger.Debug("https response not cached", "key", cacheKey, "statusCode", resp.StatusCode)
+	} else {
+		p.logger.Debug("https response not cached - method not cacheable", "method", req.Method, "statusCode", resp.StatusCode)
 	}
 
-	resp.Header.Set("X-Cache", "MISS")
+	// Set cache header based on whether request method is cacheable
+	if p.shouldCacheRequest(req) {
+		resp.Header.Set("X-Cache", "MISS")
+	}
 	newResp := http.Response{
 		StatusCode:    resp.StatusCode,
 		Proto:         resp.Proto,
