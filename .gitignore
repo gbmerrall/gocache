@@ -150,14 +150,13 @@ yarn-error.log*
 # Linux
 *~
 
-# Project-specific ignores
-# Ignore the compiled binary
-/gocache
-
 # Ignore any local test certificates
 test-certs/
 test-ca/
 
 # Ignore any local cache files
 local-cache/
+
+# ignore binaries
+binaries/gocache*
 
