@@ -410,9 +410,58 @@ func TestHTTPMethodCaching(t *testing.T) {
 	_, testServer, client, cleanup := setupProxyWithTestServer(t, nil)
 	defer cleanup()
 
-	methods := []string{"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"}
+	// Test GET method (should be cached by default)
+	t.Run("GET", func(t *testing.T) {
+		url := testServer.URL + "/dynamic?method=GET"
 
-	for _, method := range methods {
+		// First request
+		req1, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			t.Fatalf("failed to create GET request: %v", err)
+		}
+
+		resp1, err := client.Do(req1)
+		if err != nil {
+			t.Fatalf("first GET request failed: %v", err)
+		}
+		body1, _ := io.ReadAll(resp1.Body)
+		resp1.Body.Close()
+
+		if resp1.StatusCode != http.StatusOK {
+			t.Errorf("expected 200 for GET, got %d", resp1.StatusCode)
+		}
+
+		if resp1.Header.Get("X-Cache") != "MISS" {
+			t.Errorf("expected first GET to be MISS, got X-Cache: %q", resp1.Header.Get("X-Cache"))
+		}
+
+		// Second request
+		req2, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			t.Fatalf("failed to create second GET request: %v", err)
+		}
+
+		resp2, err := client.Do(req2)
+		if err != nil {
+			t.Fatalf("second GET request failed: %v", err)
+		}
+		body2, _ := io.ReadAll(resp2.Body)
+		resp2.Body.Close()
+
+		if resp2.Header.Get("X-Cache") != "HIT" {
+			t.Errorf("expected GET to be cached, got X-Cache: %q", resp2.Header.Get("X-Cache"))
+		}
+
+		// If cached, the response body should be identical
+		if string(body1) != string(body2) {
+			t.Errorf("cached response differs from original for GET method")
+		}
+	})
+
+	// Test non-cacheable methods (should not be cached by default)
+	nonCacheableMethods := []string{"POST", "PUT", "DELETE", "HEAD", "OPTIONS"}
+
+	for _, method := range nonCacheableMethods {
 		t.Run(method, func(t *testing.T) {
 			// Use different URLs per method to avoid cache conflicts
 			url := testServer.URL + "/dynamic?method=" + method
@@ -434,8 +483,10 @@ func TestHTTPMethodCaching(t *testing.T) {
 				t.Errorf("expected 200 for %s, got %d", method, resp1.StatusCode)
 			}
 
-			if resp1.Header.Get("X-Cache") != "MISS" {
-				t.Errorf("expected first %s to be MISS, got X-Cache: %q", method, resp1.Header.Get("X-Cache"))
+			// Non-cacheable methods should not have X-Cache header or should be empty
+			xCache1 := resp1.Header.Get("X-Cache")
+			if xCache1 != "" {
+				t.Errorf("expected first %s to have no X-Cache header, got X-Cache: %q", method, xCache1)
 			}
 
 			// Second request
@@ -451,15 +502,15 @@ func TestHTTPMethodCaching(t *testing.T) {
 			body2, _ := io.ReadAll(resp2.Body)
 			resp2.Body.Close()
 
-			// Note: Current proxy implementation caches all methods (this may be a bug)
-			// This test documents the current behavior rather than expected behavior
-			if resp2.Header.Get("X-Cache") != "HIT" {
-				t.Errorf("expected %s to be cached (current implementation), got X-Cache: %q", method, resp2.Header.Get("X-Cache"))
+			// Non-cacheable methods should not be cached
+			xCache2 := resp2.Header.Get("X-Cache")
+			if xCache2 != "" {
+				t.Errorf("expected second %s to have no X-Cache header, got X-Cache: %q", method, xCache2)
 			}
 
-			// If cached, the response body should be identical
-			if string(body1) != string(body2) {
-				t.Errorf("cached response differs from original for %s method", method)
+			// Responses should be different since they're not cached (dynamic content)
+			if string(body1) == string(body2) {
+				t.Logf("Warning: %s responses are identical - this may indicate caching when it shouldn't be", method)
 			}
 		})
 	}
@@ -965,11 +1016,64 @@ func TestHTTPVerbsCaching(t *testing.T) {
 	_, testServer, client, cleanup := setupProxyWithTestServer(t, nil)
 	defer cleanup()
 
-	// Test that non-GET methods work correctly with caching behavior
-	// Note: Current implementation may cache all methods, but this documents the behavior
-	methods := []string{"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"}
+	// Test GET method caching behavior
+	t.Run("GET_caching_behavior", func(t *testing.T) {
+		testServer.ResetRequestCount()
+		url := testServer.URL + "/timestamp?verb=GET"
 
-	for _, method := range methods {
+		// First request
+		req1, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			t.Fatalf("failed to create first GET request: %v", err)
+		}
+
+		resp1, err := client.Do(req1)
+		if err != nil {
+			t.Fatalf("first GET request failed: %v", err)
+		}
+		body1, _ := io.ReadAll(resp1.Body)
+		resp1.Body.Close()
+
+		if resp1.StatusCode != http.StatusOK {
+			t.Errorf("expected 200 for first GET, got %d", resp1.StatusCode)
+		}
+
+		xCache1 := resp1.Header.Get("X-Cache")
+		if xCache1 != "MISS" {
+			t.Errorf("expected first GET to be MISS, got X-Cache: %q", xCache1)
+		}
+
+		// Second request
+		req2, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			t.Fatalf("failed to create second GET request: %v", err)
+		}
+
+		resp2, err := client.Do(req2)
+		if err != nil {
+			t.Fatalf("second GET request failed: %v", err)
+		}
+		body2, _ := io.ReadAll(resp2.Body)
+		resp2.Body.Close()
+
+		xCache2 := resp2.Header.Get("X-Cache")
+		if xCache2 != "HIT" {
+			t.Errorf("expected GET method to be cached (X-Cache: %q)", xCache2)
+		}
+
+		// If cached, content should be identical
+		if string(body1) != string(body2) {
+			t.Errorf("cached GET response differs from original")
+		}
+
+		t.Logf("GET: First response X-Cache=%s, Second response X-Cache=%s", xCache1, xCache2)
+		t.Logf("GET: Server received %d requests", testServer.GetRequestCount())
+	})
+
+	// Test non-cacheable methods (should not be cached by default)
+	nonCacheableMethods := []string{"POST", "PUT", "DELETE", "HEAD", "OPTIONS"}
+
+	for _, method := range nonCacheableMethods {
 		t.Run(method+"_caching_behavior", func(t *testing.T) {
 			testServer.ResetRequestCount()
 			// Use unique URLs to avoid cache conflicts between methods
@@ -985,7 +1089,7 @@ func TestHTTPVerbsCaching(t *testing.T) {
 			if err != nil {
 				t.Fatalf("first %s request failed: %v", method, err)
 			}
-			body1, _ := io.ReadAll(resp1.Body)
+			_, _ = io.ReadAll(resp1.Body)
 			resp1.Body.Close()
 
 			if resp1.StatusCode != http.StatusOK {
@@ -993,8 +1097,8 @@ func TestHTTPVerbsCaching(t *testing.T) {
 			}
 
 			xCache1 := resp1.Header.Get("X-Cache")
-			if xCache1 != "MISS" {
-				t.Errorf("expected first %s to be MISS, got X-Cache: %q", method, xCache1)
+			if xCache1 != "" {
+				t.Errorf("expected first %s to have no X-Cache header, got X-Cache: %q", method, xCache1)
 			}
 
 			// Second request
@@ -1007,26 +1111,22 @@ func TestHTTPVerbsCaching(t *testing.T) {
 			if err != nil {
 				t.Fatalf("second %s request failed: %v", method, err)
 			}
-			body2, _ := io.ReadAll(resp2.Body)
+			_, _ = io.ReadAll(resp2.Body)
 			resp2.Body.Close()
 
 			xCache2 := resp2.Header.Get("X-Cache")
-
-			// Document current behavior: proxy caches all methods
-			if xCache2 != "HIT" {
-				t.Logf("Note: %s method not cached (X-Cache: %q)", method, xCache2)
-			} else {
-				t.Logf("%s method cached (X-Cache: %q)", method, xCache2)
-				
-				// If cached, content should be identical
-				if string(body1) != string(body2) {
-					t.Errorf("cached %s response differs from original", method)
-				}
+			if xCache2 != "" {
+				t.Errorf("expected second %s to have no X-Cache header, got X-Cache: %q", method, xCache2)
 			}
 
 			t.Logf("%s: First response X-Cache=%s, Second response X-Cache=%s", 
 				method, xCache1, xCache2)
 			t.Logf("%s: Server received %d requests", method, testServer.GetRequestCount())
+			
+			// Verify that both requests reached the server (not cached)
+			if testServer.GetRequestCount() != 2 {
+				t.Errorf("expected %s method to not be cached, but server only received %d requests", method, testServer.GetRequestCount())
+			}
 		})
 	}
 }
