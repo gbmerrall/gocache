@@ -750,3 +750,200 @@ func TestNegativeTTL(t *testing.T) {
 		}
 	})
 }
+
+func setupPostCacheTest(t *testing.T, cfg *config.Config) (*httptest.Server, *http.Client, func()) {
+	tmpDir, err := os.MkdirTemp("", "gocache-post-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	cert.SetCertDir(tmpDir)
+
+	if cfg == nil {
+		cfg = config.NewDefaultConfig()
+	}
+
+	c := cache.NewMemoryCache(1 * time.Minute)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	p, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	// Upstream server that echoes back the request body
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		if r.URL.Path == "/large" {
+			w.Write(make([]byte, 2*1024*1024)) // 2MB response
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		w.Write(body)
+	}))
+
+	p.SetTransport(http.DefaultTransport)
+	proxyServer := httptest.NewServer(p)
+	proxyURL, _ := url.Parse(proxyServer.URL)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	cleanup := func() {
+		proxyServer.Close()
+		upstream.Close()
+		os.RemoveAll(tmpDir)
+	}
+
+	return upstream, client, cleanup
+}
+
+func TestProxyPostCaching(t *testing.T) {
+	t.Run("POST caching disabled by default", func(t *testing.T) {
+		upstream, client, cleanup := setupPostCacheTest(t, nil) // Default config
+		defer cleanup()
+
+		body := "request body 1"
+		resp1, err := client.Post(upstream.URL, "text/plain", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("first request failed: %v", err)
+		}
+		if resp1.Header.Get("X-Cache") == "HIT" {
+			t.Error("expected first request to be a miss, got HIT")
+		}
+		resp1.Body.Close()
+
+		resp2, err := client.Post(upstream.URL, "text/plain", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("second request failed: %v", err)
+		}
+		if resp2.Header.Get("X-Cache") == "HIT" {
+			t.Error("expected second request to be a miss, got HIT")
+		}
+		resp2.Body.Close()
+	})
+
+	t.Run("POST caching enabled", func(t *testing.T) {
+		cfg := config.NewDefaultConfig()
+		cfg.Cache.PostCache.Enable = true
+		upstream, client, cleanup := setupPostCacheTest(t, cfg)
+		defer cleanup()
+
+		body := "request body 2"
+		resp1, err := client.Post(upstream.URL, "text/plain", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("first request failed: %v", err)
+		}
+		if resp1.Header.Get("X-Cache") != "MISS" {
+			t.Errorf("expected first request to be a MISS, got %s", resp1.Header.Get("X-Cache"))
+		}
+		resp1.Body.Close()
+
+		resp2, err := client.Post(upstream.URL, "text/plain", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("second request failed: %v", err)
+		}
+		if resp2.Header.Get("X-Cache") != "HIT" {
+			t.Errorf("expected second request to be a HIT, got %s", resp2.Header.Get("X-Cache"))
+		}
+		resp2.Body.Close()
+	})
+
+	t.Run("Request body too large", func(t *testing.T) {
+		cfg := config.NewDefaultConfig()
+		cfg.Cache.PostCache.Enable = true
+		cfg.Cache.PostCache.MaxRequestBodySizeMB = 1
+		upstream, client, cleanup := setupPostCacheTest(t, cfg)
+		defer cleanup()
+
+		body := make([]byte, 2*1024*1024) // 2MB
+		resp, err := client.Post(upstream.URL, "text/plain", strings.NewReader(string(body)))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Errorf("expected status %d, got %d", http.StatusRequestEntityTooLarge, resp.StatusCode)
+		}
+	})
+
+	t.Run("Response body too large", func(t *testing.T) {
+		cfg := config.NewDefaultConfig()
+		cfg.Cache.PostCache.Enable = true
+		cfg.Cache.PostCache.MaxResponseBodySizeMB = 1
+		upstream, client, cleanup := setupPostCacheTest(t, cfg)
+		defer cleanup()
+
+		// First request to /large endpoint
+		resp1, err := client.Post(upstream.URL+"/large", "text/plain", strings.NewReader("body"))
+		if err != nil {
+			t.Fatalf("first request failed: %v", err)
+		}
+		if resp1.Header.Get("X-Cache") == "HIT" {
+			t.Error("expected first request to be a miss, got HIT")
+		}
+		resp1.Body.Close()
+
+		// Second request should also be a miss because the response was too large to cache
+		resp2, err := client.Post(upstream.URL+"/large", "text/plain", strings.NewReader("body"))
+		if err != nil {
+			t.Fatalf("second request failed: %v", err)
+		}
+		if resp2.Header.Get("X-Cache") == "HIT" {
+			t.Error("expected second request to be a miss, got HIT")
+		}
+		resp2.Body.Close()
+	})
+
+	t.Run("IncludeQueryString option", func(t *testing.T) {
+		// Test with IncludeQueryString = true
+		cfgTrue := config.NewDefaultConfig()
+		cfgTrue.Cache.PostCache.Enable = true
+		cfgTrue.Cache.PostCache.IncludeQueryString = true
+		upstreamTrue, clientTrue, cleanupTrue := setupPostCacheTest(t, cfgTrue)
+		defer cleanupTrue()
+
+		body := "query string test"
+		// First request, should be a miss
+		resp1, _ := clientTrue.Post(upstreamTrue.URL+"?a=1", "text/plain", strings.NewReader(body))
+		if resp1.Header.Get("X-Cache") != "MISS" {
+			t.Errorf("[true] expected first request to be MISS, got %s", resp1.Header.Get("X-Cache"))
+		}
+		resp1.Body.Close()
+		// Second request, same query, should be a hit
+		resp2, _ := clientTrue.Post(upstreamTrue.URL+"?a=1", "text/plain", strings.NewReader(body))
+		if resp2.Header.Get("X-Cache") != "HIT" {
+			t.Errorf("[true] expected second request to be HIT, got %s", resp2.Header.Get("X-Cache"))
+		}
+		resp2.Body.Close()
+		// Third request, different query, should be a miss
+		resp3, _ := clientTrue.Post(upstreamTrue.URL+"?b=2", "text/plain", strings.NewReader(body))
+		if resp3.Header.Get("X-Cache") != "MISS" {
+			t.Errorf("[true] expected third request to be MISS, got %s", resp3.Header.Get("X-Cache"))
+		}
+		resp3.Body.Close()
+
+		// Test with IncludeQueryString = false
+		cfgFalse := config.NewDefaultConfig()
+		cfgFalse.Cache.PostCache.Enable = true
+		cfgFalse.Cache.PostCache.IncludeQueryString = false
+		upstreamFalse, clientFalse, cleanupFalse := setupPostCacheTest(t, cfgFalse)
+		defer cleanupFalse()
+
+		// First request, should be a miss
+		resp4, _ := clientFalse.Post(upstreamFalse.URL+"?a=1", "text/plain", strings.NewReader(body))
+		if resp4.Header.Get("X-Cache") != "MISS" {
+			t.Errorf("[false] expected fourth request to be MISS, got %s", resp4.Header.Get("X-Cache"))
+		}
+		resp4.Body.Close()
+		// Second request, different query but same body, should be a hit
+		resp5, _ := clientFalse.Post(upstreamFalse.URL+"?b=2", "text/plain", strings.NewReader(body))
+		if resp5.Header.Get("X-Cache") != "HIT" {
+			t.Errorf("[false] expected fifth request to be HIT, got %s", resp5.Header.Get("X-Cache"))
+		}
+		resp5.Body.Close()
+	})
+}

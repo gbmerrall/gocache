@@ -37,6 +37,12 @@ cacheable_types = [
     "text/plain"
 ]
 
+[cache.post_cache]
+enable = false
+include_query_string = false
+max_request_body_size_mb = 10
+max_response_body_size_mb = 10
+
 [logging]
 level = "info"
 file = ""
@@ -64,6 +70,19 @@ auto_save_interval = "5m"
 | `max_size_mb`     | Integer        | 500                                                                  | The maximum size of the cache in megabytes.                                                                                               |
 | `ignore_no_cache` | Boolean        | false                                                                | If `true`, GoCache will cache responses even if they have `Cache-Control: no-cache` or `Pragma: no-cache` headers.                        |
 | `cacheable_types` | Array of Strings | `["text/html", "text/css", "application/javascript", "application/json", "text/plain"]` | A list of `Content-Type` values that are eligible for caching.                                                                    |
+
+### `[cache.post_cache]`
+
+This section controls the optional caching of `POST` request responses. By default, this is disabled. When enabled, the cache key is generated from a SHA256 hash of the request body.
+
+| Key                         | Type    | Default | Description                                                                                                                               |
+| --------------------------- | ------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `enable`                    | Boolean | false   | If `true`, enables caching for `POST` requests.                                                                                           |
+| `include_query_string`      | Boolean | false   | If `true`, the URL's query string will be included in the cache key calculation.                                                          |
+| `max_request_body_size_mb`  | Integer | 10      | The maximum size in megabytes for a `POST` request body to be eligible for caching. Requests with larger bodies will not be cached.        |
+| `max_response_body_size_mb` | Integer | 10      | The maximum size in megabytes for a `POST` response body to be eligible for caching. Responses with larger bodies will not be cached.      |
+
+**Note:** There is a hard-coded maximum limit of 50MB for `max_request_body_size_mb` and `max_response_body_size_mb`. If you configure a value higher than 50, it will be capped at 50MB and a warning will be logged.
 
 ### `[logging]`
 

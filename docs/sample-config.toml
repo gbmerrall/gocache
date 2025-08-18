@@ -1,0 +1,56 @@
+# GoCache Sample Configuration File
+# This file contains all available options with their default values.
+# You can copy this file to gocache.toml and modify it to your needs.
+
+[server]
+# The port for the main caching proxy server.
+proxy_port = 8080
+# The port for the Control API server.
+control_port = 8081
+# The IP address to bind both servers to.
+# For security, the Control API will only bind to localhost addresses.
+bind_address = "127.0.0.1"
+
+[cache]
+# The default time-to-live for cached items (e.g., "30m", "1h", "24h").
+default_ttl = "1h"
+# The time-to-live for error responses (4xx/5xx status codes).
+negative_ttl = "10s"
+# The maximum size of the cache in megabytes.
+max_size_mb = 500
+# If true, GoCache will cache responses even if they have
+# Cache-Control: no-cache or Pragma: no-cache headers.
+ignore_no_cache = false
+# A list of Content-Type values that are eligible for caching.
+cacheable_types = [
+    "text/html",
+    "text/css",
+    "application/javascript",
+    "application/json",
+    "text/plain"
+]
+
+[cache.post_cache]
+# If true, enables caching for POST requests.
+enable = false
+# If true, the URL's query string will be included in the cache key calculation.
+include_query_string = false
+# The maximum size in megabytes for a POST request body to be eligible for caching.
+max_request_body_size_mb = 10
+# The maximum size in megabytes for a POST response body to be eligible for caching.
+max_response_body_size_mb = 10
+
+[logging]
+# The log level. Can be one of `debug`, `info`, `warn`, or `error`.
+level = "info"
+# The path to a log file. If empty, logs are written to standard output.
+file = ""
+
+[persistence]
+# If true, the cache will be saved to and loaded from disk.
+enable = true
+# The path to the file where the cache is persisted.
+# Default: ~/.config/gocache/cache.gob
+cache_file = ""
+# How often the cache is automatically saved to disk (e.g., "5m", "1h").
+auto_save_interval = "5m"

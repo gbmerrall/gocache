@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"io"
 	"log/slog"
 	"net/http"
@@ -104,6 +106,25 @@ func isErrorStatusCode(statusCode int) bool {
 	return statusCode >= 400 && statusCode <= 599
 }
 
+// getPostCacheKey creates a cache key for a POST request.
+// The key is a combination of the URL (with or without query string) and a hash of the request body.
+func (p *Proxy) getPostCacheKey(r *http.Request, body []byte) string {
+	// Start with the base URL, path only
+	keyURL := r.URL.Scheme + "://" + r.URL.Host + r.URL.Path
+
+	// Include query string if configured
+	if p.config.Cache.PostCache.IncludeQueryString && r.URL.RawQuery != "" {
+		keyURL += "?" + r.URL.RawQuery
+	}
+
+	// Add the hash of the body
+	hasher := sha256.New()
+	hasher.Write(body)
+	bodyHash := hex.EncodeToString(hasher.Sum(nil))
+
+	return keyURL + ":" + bodyHash
+}
+
 // shouldCacheRequest determines if a request should be cached based on HTTP method.
 func (p *Proxy) shouldCacheRequest(r *http.Request) bool {
 	// Only cache GET requests by default
@@ -154,7 +175,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	p.logger.Info("http request", "method", r.Method, "url", r.URL)
 	p.logger.Debug("http request details", "headers", r.Header, "contentLength", r.ContentLength)
-	
+
+	if r.Method == http.MethodPost && p.config.Cache.PostCache.Enable {
+		p.handlePostRequest(w, r)
+		return
+	}
+
 	// Only check cache for cacheable request methods
 	var cacheKey string
 	var fromCache bool
@@ -211,7 +237,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			Headers:    resp.Header,
 			Body:       body,
 		}
-		
+
 		// Use negative TTL for error status codes (4xx, 5xx)
 		if isErrorStatusCode(resp.StatusCode) {
 			negativeTTL := p.config.Cache.GetNegativeTTL()
@@ -234,14 +260,101 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(key, value)
 		}
 	}
-	
+
 	// Set cache header based on whether request method is cacheable
 	if p.shouldCacheRequest(r) {
 		w.Header().Set("X-Cache", "MISS")
 	}
-	
+
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
+}
+
+func (p *Proxy) handlePostRequest(w http.ResponseWriter, r *http.Request) {
+	// Enforce request body size limit
+	maxSize := int64(p.config.Cache.PostCache.MaxRequestBodySizeMB) * 1024 * 1024
+	r.Body = http.MaxBytesReader(w, r.Body, maxSize)
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		if err.Error() == "http: request body too large" {
+			p.logger.Warn("POST request body too large", "limit_bytes", maxSize, "url", r.URL.String())
+			http.Error(w, "Request Body Too Large", http.StatusRequestEntityTooLarge)
+		} else {
+			p.logger.Error("failed to read POST request body", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+	// Restore the body so it can be sent to the upstream server
+	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+	// Check cache
+	cacheKey := p.getPostCacheKey(r, bodyBytes)
+	if entry, ok := p.cache.Get(cacheKey); ok {
+		p.logger.Info("cache hit (POST)", "key", cacheKey)
+		p.logger.Debug("serving cached POST response", "statusCode", entry.StatusCode, "bodySize", len(entry.Body))
+		w.Header().Set("X-Cache", "HIT")
+		for key, values := range entry.Headers {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(entry.StatusCode)
+		w.Write(entry.Body)
+		return
+	}
+
+	p.logger.Info("cache miss (POST)", "key", cacheKey)
+
+	r.RequestURI = ""
+	r.Header.Del("Proxy-Connection")
+	r.Header.Del("Proxy-Authorization")
+
+	resp, err := p.transport.RoundTrip(r)
+	if err != nil {
+		p.logger.Error("failed to forward http request", "error", err)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		p.logger.Error("failed to read http response body", "error", err)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
+	// Check response body size before caching
+	maxRespSize := int64(p.config.Cache.PostCache.MaxResponseBodySizeMB) * 1024 * 1024
+	if int64(len(respBody)) > maxRespSize {
+		p.logger.Warn("POST response body too large to cache", "limit_bytes", maxRespSize, "actual_bytes", len(respBody), "url", r.URL.String())
+	} else if p.shouldCacheResponse(resp) {
+		entry := cache.CacheEntry{
+			StatusCode: resp.StatusCode,
+			Headers:    resp.Header,
+			Body:       respBody,
+		}
+
+		if isErrorStatusCode(resp.StatusCode) {
+			negativeTTL := p.config.Cache.GetNegativeTTL()
+			p.cache.SetWithTTL(cacheKey, entry, negativeTTL)
+			p.logger.Info("POST response cached with negative TTL", "key", cacheKey, "ttl", negativeTTL)
+		} else {
+			p.cache.Set(cacheKey, entry)
+			p.logger.Info("POST response cached", "key", cacheKey)
+		}
+	}
+
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.Header().Set("X-Cache", "MISS")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(respBody)
 }
 
 func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {

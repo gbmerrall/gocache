@@ -8,6 +8,7 @@ GoCache is a local caching proxy for HTTP and HTTPS traffic. It's designed to sp
 -   **MITM Proxy:** Acts as a man-in-the-middle proxy to cache HTTPS traffic.
 -   **Smart TTL Management:** Different cache lifetimes for successful vs. error responses.
 -   **Negative TTL:** Short cache duration for error responses (4xx/5xx) to reduce upstream load while allowing quick recovery.
+-   **POST Caching:** Opt-in caching for POST request responses.
 -   **Configurable:** Easily configured with a TOML file.
 -   **Control API:** A simple API for managing the cache.
 -   **CLI:** A command-line interface for interacting with the Control API.

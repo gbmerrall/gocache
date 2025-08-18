@@ -124,3 +124,89 @@ negative_ttl = "30s"
 		}
 	})
 }
+
+func TestPostCacheConfig(t *testing.T) {
+	t.Run("Defaults", func(t *testing.T) {
+		cfg := NewDefaultConfig()
+		if cfg.Cache.PostCache.Enable != false {
+			t.Error("expected PostCache.Enable to be false by default")
+		}
+		if cfg.Cache.PostCache.IncludeQueryString != false {
+			t.Error("expected PostCache.IncludeQueryString to be false by default")
+		}
+		if cfg.Cache.PostCache.MaxRequestBodySizeMB != 10 {
+			t.Errorf("got MaxRequestBodySizeMB %d, want 10", cfg.Cache.PostCache.MaxRequestBodySizeMB)
+		}
+		if cfg.Cache.PostCache.MaxResponseBodySizeMB != 10 {
+			t.Errorf("got MaxResponseBodySizeMB %d, want 10", cfg.Cache.PostCache.MaxResponseBodySizeMB)
+		}
+	})
+
+	t.Run("Load from file", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "gocache-test-postcache")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		configFile := filepath.Join(tmpDir, "gocache.toml")
+		content := `
+[cache.post_cache]
+enable = true
+include_query_string = true
+max_request_body_size_mb = 20
+max_response_body_size_mb = 25
+`
+		if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
+		}
+
+		cfg, err := LoadConfig(configFile)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		if !cfg.Cache.PostCache.Enable {
+			t.Error("expected PostCache.Enable to be true")
+		}
+		if !cfg.Cache.PostCache.IncludeQueryString {
+			t.Error("expected PostCache.IncludeQueryString to be true")
+		}
+		if cfg.Cache.PostCache.MaxRequestBodySizeMB != 20 {
+			t.Errorf("got MaxRequestBodySizeMB %d, want 20", cfg.Cache.PostCache.MaxRequestBodySizeMB)
+		}
+		if cfg.Cache.PostCache.MaxResponseBodySizeMB != 25 {
+			t.Errorf("got MaxResponseBodySizeMB %d, want 25", cfg.Cache.PostCache.MaxResponseBodySizeMB)
+		}
+	})
+
+	t.Run("Size limits capped", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "gocache-test-postcache-limits")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		configFile := filepath.Join(tmpDir, "gocache.toml")
+		content := `
+[cache.post_cache]
+max_request_body_size_mb = 100
+max_response_body_size_mb = 200
+`
+		if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
+		}
+
+		cfg, err := LoadConfig(configFile)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		if cfg.Cache.PostCache.MaxRequestBodySizeMB != MaxPostCacheBodySizeMB {
+			t.Errorf("expected MaxRequestBodySizeMB to be capped at %d, got %d", MaxPostCacheBodySizeMB, cfg.Cache.PostCache.MaxRequestBodySizeMB)
+		}
+		if cfg.Cache.PostCache.MaxResponseBodySizeMB != MaxPostCacheBodySizeMB {
+			t.Errorf("expected MaxResponseBodySizeMB to be capped at %d, got %d", MaxPostCacheBodySizeMB, cfg.Cache.PostCache.MaxResponseBodySizeMB)
+		}
+	})
+}

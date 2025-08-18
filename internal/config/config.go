@@ -1,11 +1,16 @@
 package config
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/BurntSushi/toml"
+)
+
+const (
+	MaxPostCacheBodySizeMB = 50
 )
 
 type Config struct {
@@ -22,12 +27,20 @@ type ServerConfig struct {
 	BindAddress string `toml:"bind_address"`
 }
 
+type PostCacheConfig struct {
+	Enable                bool `toml:"enable"`
+	IncludeQueryString    bool `toml:"include_query_string"`
+	MaxRequestBodySizeMB  int  `toml:"max_request_body_size_mb"`
+	MaxResponseBodySizeMB int  `toml:"max_response_body_size_mb"`
+}
+
 type CacheConfig struct {
-	DefaultTTL     string   `toml:"default_ttl"`
-	NegativeTTL    string   `toml:"negative_ttl"`
-	MaxSizeMB      int      `toml:"max_size_mb"`
-	IgnoreNoCache  bool     `toml:"ignore_no_cache"`
-	CacheableTypes []string `toml:"cacheable_types"`
+	DefaultTTL     string          `toml:"default_ttl"`
+	NegativeTTL    string          `toml:"negative_ttl"`
+	MaxSizeMB      int             `toml:"max_size_mb"`
+	IgnoreNoCache  bool            `toml:"ignore_no_cache"`
+	CacheableTypes []string        `toml:"cacheable_types"`
+	PostCache      PostCacheConfig `toml:"post_cache"`
 }
 
 type LoggingConfig struct {
@@ -87,6 +100,12 @@ func NewDefaultConfig() *Config {
 				"application/json",
 				"text/plain",
 			},
+			PostCache: PostCacheConfig{
+				Enable:                false,
+				IncludeQueryString:    false,
+				MaxRequestBodySizeMB:  10,
+				MaxResponseBodySizeMB: 10,
+			},
 		},
 		Logging: LoggingConfig{
 			Level: "info",
@@ -126,6 +145,16 @@ func LoadConfig(path string) (*Config, error) {
 			return nil, err
 		}
 		cfg.LoadedPath = configPath
+	}
+
+	// Validate PostCache sizes
+	if cfg.Cache.PostCache.MaxRequestBodySizeMB > MaxPostCacheBodySizeMB {
+		slog.Warn("config: max_request_body_size_mb exceeds hard limit", "limit_mb", MaxPostCacheBodySizeMB, "configured_mb", cfg.Cache.PostCache.MaxRequestBodySizeMB)
+		cfg.Cache.PostCache.MaxRequestBodySizeMB = MaxPostCacheBodySizeMB
+	}
+	if cfg.Cache.PostCache.MaxResponseBodySizeMB > MaxPostCacheBodySizeMB {
+		slog.Warn("config: max_response_body_size_mb exceeds hard limit", "limit_mb", MaxPostCacheBodySizeMB, "configured_mb", cfg.Cache.PostCache.MaxResponseBodySizeMB)
+		cfg.Cache.PostCache.MaxResponseBodySizeMB = MaxPostCacheBodySizeMB
 	}
 
 	// If no config file was loaded, cfg will just be the defaults.
