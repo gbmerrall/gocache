@@ -1,4 +1,7 @@
 # GoCache
+<div align="center"><img src="assets/gocache_150h.png" alt="GoCache AI Generated Logo" height="150"></div>
+
+<cennter>![GoCache AI Generated Logo](./)</center>
 
 GoCache is a local caching proxy for HTTP and HTTPS traffic. It's designed to speed up webscraping or other development workflows by caching frequently requested assets.
 
