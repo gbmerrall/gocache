@@ -77,34 +77,47 @@ func startServer(configPath, logLevelOverride string, testShutdown ...func()) {
 		exit(1)
 	}
 
-	var logWriter io.Writer = os.Stdout
-	if cfg.Logging.File != "" {
-		file, err := os.OpenFile(cfg.Logging.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-		if err != nil {
-			slog.Default().Error("failed to open log file", "error", err)
-			exit(1)
-		}
-		logWriter = io.MultiWriter(os.Stdout, file)
-	}
-
-	var level slog.Level
-	logLevelStr := cfg.Logging.Level
+	// Get effective application logging settings
+	appLevel := cfg.Logging.GetEffectiveAppLevel()
+	appLogfile := cfg.Logging.GetEffectiveAppLogfile()
+	
+	// Override with command line if provided
 	if logLevelOverride != "" {
-		logLevelStr = logLevelOverride
+		appLevel = logLevelOverride
 	}
-	switch strings.ToLower(logLevelStr) {
-	case "debug":
-		level = slog.LevelDebug
-	case "info":
-		level = slog.LevelInfo
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	default:
-		level = slog.LevelInfo
+	
+	// If application logging is disabled, create a no-op logger
+	var logger *slog.Logger
+	if appLevel == "" {
+		// Create a logger that discards all output (application logging disabled)
+		logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError + 1}))
+	} else {
+		// Application logging is enabled, set up the logger properly
+		var logWriter io.Writer = os.Stdout
+		if appLogfile != "" {
+			file, err := os.OpenFile(appLogfile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+			if err != nil {
+				slog.Default().Error("failed to open application log file", "error", err)
+				exit(1)
+			}
+			logWriter = io.MultiWriter(os.Stdout, file)
+		}
+
+		var level slog.Level
+		switch strings.ToLower(appLevel) {
+		case "debug":
+			level = slog.LevelDebug
+		case "info":
+			level = slog.LevelInfo
+		case "warn":
+			level = slog.LevelWarn
+		case "error":
+			level = slog.LevelError
+		default:
+			level = slog.LevelInfo
+		}
+		logger = slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: level}))
 	}
-	logger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: level}))
 
 	if err := pidfile.Write(); err != nil {
 		logger.Error("failed to write pidfile", "error", err)
@@ -164,7 +177,7 @@ func startServer(configPath, logLevelOverride string, testShutdown ...func()) {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.BindAddress, cfg.Server.ProxyPort)
 	logger.Info("GoCache starting", "address", addr)
-	logger.Debug("server configuration", "proxyPort", cfg.Server.ProxyPort, "controlPort", cfg.Server.ControlPort, "logLevel", logLevelStr)
+	logger.Debug("server configuration", "proxyPort", cfg.Server.ProxyPort, "controlPort", cfg.Server.ControlPort, "appLevel", appLevel)
 
 	if err := p.Start(addr); err != nil && err != http.ErrServerClosed {
 		logger.Error("proxy failed", "error", err)

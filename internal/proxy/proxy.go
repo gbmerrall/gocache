@@ -16,21 +16,24 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gbmerrall/gocache/internal/cache"
 	"github.com/gbmerrall/gocache/internal/cert"
 	"github.com/gbmerrall/gocache/internal/config"
+	"github.com/gbmerrall/gocache/internal/logging"
 )
 
 // Proxy is the main proxy server struct.
 type Proxy struct {
-	logger    *slog.Logger
-	config    *config.Config
-	cache     *cache.MemoryCache
-	ca        *x509.Certificate
-	caPrivKey *rsa.PrivateKey
-	server    *http.Server
-	transport http.RoundTripper
+	logger      *slog.Logger
+	config      *config.Config
+	cache       *cache.MemoryCache
+	accessLog   *logging.AccessLogger
+	ca          *x509.Certificate
+	caPrivKey   *rsa.PrivateKey
+	server      *http.Server
+	transport   http.RoundTripper
 
 	certCache   map[string]*tls.Certificate
 	certCacheMu sync.RWMutex
@@ -43,10 +46,37 @@ func NewProxy(logger *slog.Logger, c *cache.MemoryCache, cfg *config.Config) (*P
 		return nil, err
 	}
 
+	// Apply process detection for access log configuration
+	cfg.Logging.ApplyProcessDetection(logging.IsForegroundMode())
+
+	// Initialize access logger if needed
+	var accessLog *logging.AccessLogger
+	if cfg.Logging.AccessToStdout || cfg.Logging.AccessLogfile != "" {
+		format := logging.FormatHuman
+		if cfg.Logging.ValidateAccessFormat() == "json" {
+			format = logging.FormatJSON
+		}
+
+		accessLogConfig := logging.AccessLoggerConfig{
+			Format:        format,
+			StdoutEnabled: cfg.Logging.AccessToStdout,
+			LogFile:       cfg.Logging.AccessLogfile,
+			BufferSize:    1000,
+			ErrorHandler:  logging.DefaultErrorHandler,
+		}
+
+		accessLog, err = logging.NewAccessLogger(accessLogConfig)
+		if err != nil {
+			logger.Warn("failed to initialize access logger", "error", err)
+			// Continue without access logging
+		}
+	}
+
 	p := &Proxy{
 		logger:    logger,
 		config:    cfg,
 		cache:     c,
+		accessLog: accessLog,
 		ca:        ca,
 		caPrivKey: caPrivKey,
 		certCache: make(map[string]*tls.Certificate),
@@ -76,6 +106,32 @@ func (p *Proxy) SetConfig(cfg *config.Config) {
 // SetTransport sets the transport for the proxy.
 func (p *Proxy) SetTransport(transport http.RoundTripper) {
 	p.transport = transport
+}
+
+// Close gracefully shuts down the proxy and its components
+func (p *Proxy) Close() error {
+	if p.accessLog != nil {
+		return p.accessLog.Close()
+	}
+	return nil
+}
+
+// logAccess logs an HTTP request/response to the access log if enabled
+func (p *Proxy) logAccess(startTime time.Time, r *http.Request, statusCode int, responseSize int64, cacheStatus string, contentType string) {
+	if p.accessLog != nil {
+		duration := time.Since(startTime)
+		fullURL := r.URL.String()
+		if r.Host != "" && !strings.HasPrefix(fullURL, "http") {
+			// For CONNECT requests or relative URLs, construct full URL
+			scheme := "http"
+			if r.TLS != nil {
+				scheme = "https"
+			}
+			fullURL = scheme + "://" + r.Host + r.URL.String()
+		}
+		
+		p.accessLog.LogRequest(r.Method, fullURL, cacheStatus, statusCode, responseSize, duration, contentType)
+	}
 }
 
 // getCacheKey creates a normalized cache key from a request's URL.
@@ -173,11 +229,23 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	startTime := time.Now()
+	
+	// Wrap response writer for access logging
+	crw := logging.NewCountingResponseWriter(w)
+	
 	p.logger.Info("http request", "method", r.Method, "url", r.URL)
 	p.logger.Debug("http request details", "headers", r.Header, "contentLength", r.ContentLength)
 
 	if r.Method == http.MethodPost && p.config.Cache.PostCache.Enable {
-		p.handlePostRequest(w, r)
+		p.handlePostRequest(crw, r)
+		// Log access for POST requests handled separately
+		contentType := crw.Header().Get("Content-Type")
+		cacheStatus := crw.Header().Get("X-Cache")
+		if cacheStatus == "" {
+			cacheStatus = "" // POST requests may or may not be cached
+		}
+		p.logAccess(startTime, r, crw.StatusCode(), crw.Size(), cacheStatus, contentType)
 		return
 	}
 
@@ -189,14 +257,18 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		if entry, ok := p.cache.Get(cacheKey); ok {
 			p.logger.Info("cache hit", "key", cacheKey)
 			p.logger.Debug("serving cached response", "statusCode", entry.StatusCode, "bodySize", len(entry.Body))
-			w.Header().Set("X-Cache", "HIT")
+			crw.Header().Set("X-Cache", "HIT")
 			for key, values := range entry.Headers {
 				for _, value := range values {
-					w.Header().Add(key, value)
+					crw.Header().Add(key, value)
 				}
 			}
-			w.WriteHeader(entry.StatusCode)
-			w.Write(entry.Body)
+			crw.WriteHeader(entry.StatusCode)
+			crw.Write(entry.Body)
+			
+			// Log access for cached response
+			contentType := crw.Header().Get("Content-Type")
+			p.logAccess(startTime, r, crw.StatusCode(), crw.Size(), "HIT", contentType)
 			return
 		}
 		fromCache = false
@@ -218,7 +290,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		p.logger.Error("failed to forward http request", "error", err)
 		p.logger.Debug("upstream request failed", "url", r.URL.String(), "error", err)
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		http.Error(crw, err.Error(), http.StatusServiceUnavailable)
+		// Log access for error response
+		p.logAccess(startTime, r, http.StatusServiceUnavailable, crw.Size(), "", "text/plain")
 		return
 	}
 	defer resp.Body.Close()
@@ -226,7 +300,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		p.logger.Error("failed to read http response body", "error", err)
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		http.Error(crw, err.Error(), http.StatusServiceUnavailable)
+		// Log access for error response
+		p.logAccess(startTime, r, http.StatusServiceUnavailable, crw.Size(), "", "text/plain")
 		return
 	}
 
@@ -257,17 +333,25 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	for key, values := range resp.Header {
 		for _, value := range values {
-			w.Header().Add(key, value)
+			crw.Header().Add(key, value)
 		}
 	}
 
 	// Set cache header based on whether request method is cacheable
+	var cacheStatus string
 	if p.shouldCacheRequest(r) {
-		w.Header().Set("X-Cache", "MISS")
+		crw.Header().Set("X-Cache", "MISS")
+		cacheStatus = "MISS"
+	} else {
+		cacheStatus = "" // Non-cacheable requests don't have cache status
 	}
 
-	w.WriteHeader(resp.StatusCode)
-	w.Write(body)
+	crw.WriteHeader(resp.StatusCode)
+	crw.Write(body)
+	
+	// Log access for successful response
+	contentType := crw.Header().Get("Content-Type")
+	p.logAccess(startTime, r, crw.StatusCode(), crw.Size(), cacheStatus, contentType)
 }
 
 func (p *Proxy) handlePostRequest(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +442,8 @@ func (p *Proxy) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
+	startTime := time.Now()
+	
 	p.logger.Info("https request", "host", r.Host)
 	p.logger.Debug("https connect request details", "method", r.Method, "host", r.Host, "userAgent", r.Header.Get("User-Agent"))
 
@@ -421,6 +507,12 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := cachedResp.Write(tlsConn); err != nil {
 				p.logger.Error("failed to write cached https response", "error", err)
+				// Log access for error
+				p.logAccess(startTime, req, http.StatusInternalServerError, 0, "HIT", "")
+			} else {
+				// Log access for successful cached response
+				contentType := entry.Headers.Get("Content-Type")
+				p.logAccess(startTime, req, entry.StatusCode, int64(len(entry.Body)), "HIT", contentType)
 			}
 			return
 		}
@@ -447,6 +539,8 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			Body:       io.NopCloser(bytes.NewBufferString("Bad Gateway\n")),
 		}
 		errorResponse.Write(tlsConn)
+		// Log access for error response
+		p.logAccess(startTime, req, http.StatusBadGateway, 12, "", "text/plain") // "Bad Gateway\n" is 12 bytes
 		return
 	}
 	defer resp.Body.Close()
@@ -454,6 +548,8 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		p.logger.Error("failed to read https response body", "error", err)
+		// Log access for error
+		p.logAccess(startTime, req, http.StatusInternalServerError, 0, "", "")
 		return
 	}
 
@@ -483,9 +579,14 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set cache header based on whether request method is cacheable
+	var cacheStatus string
 	if p.shouldCacheRequest(req) {
 		resp.Header.Set("X-Cache", "MISS")
+		cacheStatus = "MISS"
+	} else {
+		cacheStatus = "" // Non-cacheable requests don't have cache status
 	}
+	
 	newResp := http.Response{
 		StatusCode:    resp.StatusCode,
 		Proto:         resp.Proto,
@@ -495,8 +596,15 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		Body:          io.NopCloser(bytes.NewReader(body)),
 		ContentLength: int64(len(body)),
 	}
+	
 	if err := newResp.Write(tlsConn); err != nil {
 		p.logger.Error("failed to write https response", "error", err)
+		// Log access for write error
+		p.logAccess(startTime, req, http.StatusInternalServerError, 0, cacheStatus, "")
+	} else {
+		// Log access for successful response
+		contentType := resp.Header.Get("Content-Type")
+		p.logAccess(startTime, req, resp.StatusCode, int64(len(body)), cacheStatus, contentType)
 	}
 }
 

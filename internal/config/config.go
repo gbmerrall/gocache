@@ -44,8 +44,18 @@ type CacheConfig struct {
 }
 
 type LoggingConfig struct {
-	Level string `toml:"level"`
-	File  string `toml:"file"`
+	// Application logs (legacy fields kept for compatibility)
+	Level   string `toml:"level"`    // Deprecated: use AppLevel
+	File    string `toml:"file"`     // Deprecated: use AppLogfile
+	
+	// Application logs (new fields)
+	AppLevel   string `toml:"app_level"`
+	AppLogfile string `toml:"app_logfile"`
+	
+	// Access logs
+	AccessToStdout bool   `toml:"access_to_stdout"`
+	AccessLogfile  string `toml:"access_logfile"`
+	AccessFormat   string `toml:"access_format"`
 }
 
 type PersistenceConfig struct {
@@ -78,6 +88,48 @@ func (p *PersistenceConfig) GetAutoSaveInterval() time.Duration {
 	return d
 }
 
+// GetEffectiveAppLevel returns the effective application log level
+// Handles backward compatibility with legacy Level field
+func (l *LoggingConfig) GetEffectiveAppLevel() string {
+	if l.AppLevel != "" {
+		return l.AppLevel
+	}
+	if l.Level != "" {
+		return l.Level
+	}
+	return ""
+}
+
+// GetEffectiveAppLogfile returns the effective application log file
+// Handles backward compatibility with legacy File field
+func (l *LoggingConfig) GetEffectiveAppLogfile() string {
+	if l.AppLogfile != "" {
+		return l.AppLogfile
+	}
+	return l.File
+}
+
+// ValidateAccessFormat validates the access log format
+func (l *LoggingConfig) ValidateAccessFormat() string {
+	switch l.AccessFormat {
+	case "human", "json":
+		return l.AccessFormat
+	case "":
+		return "human" // default
+	default:
+		slog.Warn("config: invalid access_format, using default", "invalid", l.AccessFormat, "default", "human")
+		return "human"
+	}
+}
+
+// ApplyProcessDetection applies proper process detection for AccessToStdout
+// This should be called after config loading to set the appropriate default
+func (l *LoggingConfig) ApplyProcessDetection(isForeground bool) {
+	// Set AccessToStdout based on process mode detection
+	// This provides a sensible default: stdout for foreground, no stdout for daemon
+	l.AccessToStdout = isForeground
+}
+
 func NewDefaultConfig() *Config {
 	configDir, _ := os.UserConfigDir()
 	gocacheDir := filepath.Join(configDir, "gocache")
@@ -108,8 +160,16 @@ func NewDefaultConfig() *Config {
 			},
 		},
 		Logging: LoggingConfig{
-			Level: "info",
+			// Legacy fields (kept for backward compatibility)
+			Level: "", // Application logging disabled by default
 			File:  "",
+			
+			// New logging configuration with proper defaults
+			AppLevel:       "", // Application logging disabled by default
+			AppLogfile:     "",
+			AccessToStdout: true, // Will be set properly by ApplyProcessDetection()
+			AccessLogfile:  "",
+			AccessFormat:   "human",
 		},
 		Persistence: PersistenceConfig{
 			Enable:           false,
@@ -156,6 +216,18 @@ func LoadConfig(path string) (*Config, error) {
 		slog.Warn("config: max_response_body_size_mb exceeds hard limit", "limit_mb", MaxPostCacheBodySizeMB, "configured_mb", cfg.Cache.PostCache.MaxResponseBodySizeMB)
 		cfg.Cache.PostCache.MaxResponseBodySizeMB = MaxPostCacheBodySizeMB
 	}
+
+	// Validate logging configuration
+	if cfg.Logging.GetEffectiveAppLevel() != "" {
+		validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+		if !validLevels[cfg.Logging.GetEffectiveAppLevel()] {
+			slog.Warn("config: invalid app_level, disabling application logging", "invalid", cfg.Logging.GetEffectiveAppLevel())
+			cfg.Logging.AppLevel = ""
+		}
+	}
+	
+	// Validate access format
+	cfg.Logging.AccessFormat = cfg.Logging.ValidateAccessFormat()
 
 	// If no config file was loaded, cfg will just be the defaults.
 	return cfg, nil
