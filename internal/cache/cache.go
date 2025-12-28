@@ -32,8 +32,10 @@ type CacheEntry struct {
 type CacheStats struct {
 	Hits          uint64
 	Misses        uint64
+	Evictions     uint64  // LRU evictions due to size limit
 	EntryCount    int
-	TotalSize     int64
+	TotalSize     int64   // Current total size in bytes
+	MaxSize       int64   // Configured maximum size in bytes
 	UptimeSeconds float64
 }
 
@@ -183,16 +185,13 @@ func (c *MemoryCache) GetStats() CacheStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	var totalSize int64
-	for _, item := range c.items {
-		totalSize += int64(len(item.Body))
-	}
-
 	return CacheStats{
 		Hits:          c.hits.Load(),
 		Misses:        c.misses.Load(),
+		Evictions:     c.evictions.Load(),
 		EntryCount:    len(c.items),
-		TotalSize:     totalSize,
+		TotalSize:     c.currentSize,
+		MaxSize:       c.maxSize,
 		UptimeSeconds: time.Since(c.startTime).Seconds(),
 	}
 }
