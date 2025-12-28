@@ -110,6 +110,9 @@ func (p *Proxy) SetTransport(transport http.RoundTripper) {
 
 // Close gracefully shuts down the proxy and its components
 func (p *Proxy) Close() error {
+	if p.cache != nil {
+		p.cache.Shutdown()
+	}
 	if p.accessLog != nil {
 		return p.accessLog.Close()
 	}
