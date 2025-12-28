@@ -125,7 +125,7 @@ func startServer(configPath, logLevelOverride string, testShutdown ...func()) {
 	}
 	defer pidfile.Remove()
 
-	c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL())
+	c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL(), cfg.Cache.MaxSizeMB)
 	logger.Debug("memory cache created", "defaultTTL", cfg.Cache.GetDefaultTTL())
 	if cfg.Persistence.Enable {
 		logger.Debug("persistence enabled, loading cache from file", "file", cfg.Persistence.CacheFile)

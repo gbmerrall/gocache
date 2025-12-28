@@ -28,7 +28,7 @@ func setupProxyTest(t *testing.T) (*httptest.Server, *http.Client, *cache.Memory
 	cert.SetCertDir(tmpDir)
 
 	cfg := config.NewDefaultConfig()
-	c := cache.NewMemoryCache(1 * time.Minute)
+	c := cache.NewMemoryCache(1 * time.Minute, 0)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	p, err := NewProxy(logger, c, cfg)
 	if err != nil {
@@ -145,7 +145,7 @@ func setupTestProxy(t *testing.T) (*Proxy, func()) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := config.NewDefaultConfig()
-	c := cache.NewMemoryCache(1 * time.Minute)
+	c := cache.NewMemoryCache(1 * time.Minute, 0)
 
 	p, err := NewProxy(logger, c, cfg)
 	if err != nil {
@@ -168,7 +168,7 @@ func TestNewProxy(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := config.NewDefaultConfig()
-	c := cache.NewMemoryCache(1 * time.Minute)
+	c := cache.NewMemoryCache(1 * time.Minute, 0)
 
 	proxy, err := NewProxy(logger, c, cfg)
 	if err != nil {
@@ -605,7 +605,7 @@ func TestNegativeTTL(t *testing.T) {
 		cfg.Cache.DefaultTTL = "1h"
 		cfg.Cache.NegativeTTL = "50ms" // Very short for testing
 		
-		c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL())
+		c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL(), cfg.Cache.MaxSizeMB)
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		
 		p, err := NewProxy(logger, c, cfg)
@@ -675,7 +675,7 @@ func TestNegativeTTL(t *testing.T) {
 		cfg.Cache.DefaultTTL = "200ms" // Short for testing but longer than negative
 		cfg.Cache.NegativeTTL = "50ms"
 		
-		c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL())
+		c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL(), cfg.Cache.MaxSizeMB)
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		
 		p, err := NewProxy(logger, c, cfg)
@@ -762,7 +762,7 @@ func setupPostCacheTest(t *testing.T, cfg *config.Config) (*httptest.Server, *ht
 		cfg = config.NewDefaultConfig()
 	}
 
-	c := cache.NewMemoryCache(1 * time.Minute)
+	c := cache.NewMemoryCache(1 * time.Minute, 0)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	p, err := NewProxy(logger, c, cfg)
 	if err != nil {

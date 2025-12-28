@@ -30,7 +30,7 @@ func TestAccessLoggingSimple(t *testing.T) {
 
 	// Create proxy with a mock transport
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	memCache := cache.NewMemoryCache(100)
+	memCache := cache.NewMemoryCache(100*time.Millisecond, 0)
 	
 	proxy := &Proxy{
 		logger:    logger,
@@ -131,7 +131,7 @@ func TestAccessLoggingJSON(t *testing.T) {
 
 	// Create proxy with mock transport
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	memCache := cache.NewMemoryCache(100)
+	memCache := cache.NewMemoryCache(100*time.Millisecond, 0)
 	
 	proxy := &Proxy{
 		logger:    logger,
@@ -206,7 +206,7 @@ func TestAccessLoggingDisabled(t *testing.T) {
 
 	// Create proxy with mock transport
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	memCache := cache.NewMemoryCache(100)
+	memCache := cache.NewMemoryCache(100*time.Millisecond, 0)
 	
 	proxy := &Proxy{
 		logger:    logger,

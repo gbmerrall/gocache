@@ -52,13 +52,19 @@ type MemoryCache struct {
 	stopCleanup chan struct{}  // Signal to stop background cleanup goroutine
 }
 
-// NewMemoryCache creates a new MemoryCache with a default TTL for entries.
-func NewMemoryCache(defaultTTL time.Duration) *MemoryCache {
-	return &MemoryCache{
-		items:      make(map[string]CacheEntry),
-		defaultTTL: defaultTTL,
-		startTime:  time.Now(),
+// NewMemoryCache creates a new MemoryCache with a default TTL and maximum size.
+// maxSizeMB of 0 means unlimited (no eviction).
+func NewMemoryCache(defaultTTL time.Duration, maxSizeMB int) *MemoryCache {
+	c := &MemoryCache{
+		items:       make(map[string]*list.Element),
+		lruList:     list.New(),
+		maxSize:     int64(maxSizeMB) * 1024 * 1024,
+		defaultTTL:  defaultTTL,
+		startTime:   time.Now(),
+		stopCleanup: make(chan struct{}),
 	}
+	go c.cleanupExpired()
+	return c
 }
 
 // Get retrieves a CacheEntry from the cache.

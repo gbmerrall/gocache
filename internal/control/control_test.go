@@ -27,7 +27,7 @@ func setupTestAPI(t *testing.T) (*ControlAPI, func()) {
 	cert.SetCertDir(tmpDir)
 
 	cfg := config.NewDefaultConfig()
-	c := cache.NewMemoryCache(1 * time.Minute)
+	c := cache.NewMemoryCache(1 * time.Minute, 0)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	p, err := proxy.NewProxy(logger, c, cfg)
 	if err != nil {

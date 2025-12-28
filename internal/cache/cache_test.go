@@ -12,7 +12,7 @@ import (
 
 func TestMemoryCache(t *testing.T) {
 	t.Run("Set and Get", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute)
+		c := NewMemoryCache(1 * time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("hello"),
@@ -29,7 +29,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("Get expired", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Millisecond)
+		c := NewMemoryCache(1 * time.Millisecond, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("world"),
@@ -45,7 +45,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("Get non-existent", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute)
+		c := NewMemoryCache(1 * time.Minute, 0)
 		_, ok := c.Get("nonexistent")
 		if ok {
 			t.Fatal("expected not to find non-existent key")
@@ -53,7 +53,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("UpdateTTL", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Hour)
+		c := NewMemoryCache(1 * time.Hour, 0)
 		newTTL := 2 * time.Hour
 		c.UpdateTTL(newTTL)
 
@@ -74,7 +74,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("PurgeAll", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute)
+		c := NewMemoryCache(1 * time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("test"),
@@ -98,7 +98,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("PurgeByURL", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute)
+		c := NewMemoryCache(1 * time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("test"),
@@ -122,7 +122,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("PurgeByDomain", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute)
+		c := NewMemoryCache(1 * time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("test"),
@@ -151,7 +151,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("ConcurrentAccess", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute)
+		c := NewMemoryCache(1 * time.Minute, 0)
 		var wg sync.WaitGroup
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
@@ -194,7 +194,7 @@ func TestCachePersistence(t *testing.T) {
 	cacheFile := filepath.Join(tmpDir, "cache.gob")
 
 	t.Run("SaveToFile", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute)
+		c := NewMemoryCache(1 * time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Headers:    http.Header{"Content-Type": []string{"text/plain"}},
@@ -214,7 +214,7 @@ func TestCachePersistence(t *testing.T) {
 	})
 
 	t.Run("LoadFromFile", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute)
+		c := NewMemoryCache(1 * time.Minute, 0)
 		err := c.LoadFromFile(cacheFile)
 		if err != nil {
 			t.Fatalf("failed to load cache: %v", err)
@@ -233,7 +233,7 @@ func TestCachePersistence(t *testing.T) {
 	})
 
 	t.Run("LoadFromNonExistentFile", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute)
+		c := NewMemoryCache(1 * time.Minute, 0)
 		err := c.LoadFromFile("nonexistent.gob")
 		if err == nil {
 			t.Error("expected error loading non-existent file")
@@ -241,7 +241,7 @@ func TestCachePersistence(t *testing.T) {
 	})
 
 	t.Run("SaveToFileWithDirectoryCreation", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute)
+		c := NewMemoryCache(1 * time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("test"),
@@ -261,7 +261,7 @@ func TestCachePersistence(t *testing.T) {
 }
 
 func TestCacheStats(t *testing.T) {
-	c := NewMemoryCache(1 * time.Minute)
+	c := NewMemoryCache(1 * time.Minute, 0)
 	entry := CacheEntry{
 		StatusCode: http.StatusOK,
 		Body:       []byte("stats test"),
@@ -299,7 +299,7 @@ func TestCacheStats(t *testing.T) {
 
 func TestSetWithTTL(t *testing.T) {
 	t.Run("SetWithTTL custom duration", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Hour) // Default TTL of 1 hour
+		c := NewMemoryCache(1 * time.Hour, 0) // Default TTL of 1 hour
 		entry := CacheEntry{
 			StatusCode: http.StatusNotFound,
 			Body:       []byte("error response"),
@@ -326,7 +326,7 @@ func TestSetWithTTL(t *testing.T) {
 	})
 	
 	t.Run("SetWithTTL expiration", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Hour)
+		c := NewMemoryCache(1 * time.Hour, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusInternalServerError,
 			Body:       []byte("server error"),
@@ -346,7 +346,7 @@ func TestSetWithTTL(t *testing.T) {
 	})
 	
 	t.Run("SetWithTTL vs Set comparison", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Hour)
+		c := NewMemoryCache(1 * time.Hour, 0)
 		entry1 := CacheEntry{StatusCode: http.StatusOK, Body: []byte("normal")}
 		entry2 := CacheEntry{StatusCode: http.StatusNotFound, Body: []byte("error")}
 		

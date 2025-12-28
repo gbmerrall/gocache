@@ -31,7 +31,7 @@ func setupProxyWithTestServer(t *testing.T, cfg *config.Config) (*Proxy, *TestSe
 		cfg = config.NewDefaultConfig()
 	}
 	
-	c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL())
+	c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL(), cfg.Cache.MaxSizeMB)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	
 	p, err := NewProxy(logger, c, cfg)
