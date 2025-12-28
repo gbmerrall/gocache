@@ -67,22 +67,30 @@ func NewMemoryCache(defaultTTL time.Duration, maxSizeMB int) *MemoryCache {
 	return c
 }
 
-// Get retrieves a CacheEntry from the cache.
+// Get retrieves a CacheEntry from the cache and marks it as recently used.
 func (c *MemoryCache) Get(key string) (CacheEntry, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	entry, found := c.items[key]
-	if !found || time.Now().After(entry.Expiry) {
-		if found {
-			go c.delete(key)
-		}
+	elem, found := c.items[key]
+	if !found {
 		c.misses.Add(1)
 		return CacheEntry{}, false
 	}
 
+	node := elem.Value.(*cacheNode)
+
+	// Check if expired
+	if time.Now().After(node.entry.Expiry) {
+		c.removeElement(elem)
+		c.misses.Add(1)
+		return CacheEntry{}, false
+	}
+
+	// Move to front (mark as recently used)
+	c.lruList.MoveToFront(elem)
 	c.hits.Add(1)
-	return entry, true
+	return node.entry, true
 }
 
 // Set adds a CacheEntry to the cache.
