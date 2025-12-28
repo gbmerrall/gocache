@@ -172,7 +172,10 @@ func (c *MemoryCache) SetWithTTL(key string, entry CacheEntry, ttl time.Duration
 func (c *MemoryCache) delete(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.items, key)
+
+	if elem, exists := c.items[key]; exists {
+		c.removeElement(elem)
+	}
 }
 
 // GetStats returns the current statistics for the cache.
