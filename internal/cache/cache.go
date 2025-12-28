@@ -234,19 +234,58 @@ func (c *MemoryCache) SaveToFile(filename string) error {
 	return os.Rename(tmpFile.Name(), filename)
 }
 
-// LoadFromFile loads the cache from a file.
+// LoadFromFile loads the cache from a file and rebuilds LRU state.
 func (c *MemoryCache) LoadFromFile(filename string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	file, err := os.Open(filename)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
+	// Decode into temporary map
+	tempItems := make(map[string]CacheEntry)
 	decoder := gob.NewDecoder(file)
-	return decoder.Decode(&c.items)
+	if err := decoder.Decode(&tempItems); err != nil {
+		return err
+	}
+
+	// Rebuild cache with LRU state
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.items = make(map[string]*list.Element)
+	c.lruList = list.New()
+	c.currentSize = 0
+
+	// Add all entries (oldest first, so most recent end up at front)
+	for key, entry := range tempItems {
+		// Skip expired entries
+		if time.Now().After(entry.Expiry) {
+			continue
+		}
+
+		entrySize := int64(len(entry.Body))
+
+		// Skip entries that are too large
+		if c.maxSize > 0 && entrySize > c.maxSize {
+			continue
+		}
+
+		// Evict if needed
+		c.evictUntilSize(entrySize)
+
+		// Add to cache
+		node := &cacheNode{
+			key:   key,
+			entry: entry,
+			size:  entrySize,
+		}
+		elem := c.lruList.PushFront(node)
+		c.items[key] = elem
+		c.currentSize += entrySize
+	}
+
+	return nil
 }
 
 // PurgeAll clears the entire cache and resets statistics.
