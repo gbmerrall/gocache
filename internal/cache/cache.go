@@ -130,24 +130,42 @@ func (c *MemoryCache) evictUntilSize(neededSize int64) {
 	}
 }
 
-// Set adds a CacheEntry to the cache.
+// Set adds a CacheEntry to the cache with size enforcement and LRU eviction.
 func (c *MemoryCache) Set(key string, entry CacheEntry) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	entry.Expiry = time.Now().Add(c.defaultTTL)
-	c.items[key] = entry
-	// Note: Debug logging would require logger injection - skipping for now
+	c.SetWithTTL(key, entry, c.defaultTTL)
 }
 
-// SetWithTTL adds a CacheEntry to the cache with a custom TTL.
+// SetWithTTL adds a CacheEntry to the cache with a custom TTL and size enforcement.
 func (c *MemoryCache) SetWithTTL(key string, entry CacheEntry, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	entrySize := int64(len(entry.Body))
+
+	// Check if single entry exceeds max size
+	if c.maxSize > 0 && entrySize > c.maxSize {
+		// Entry too large - reject it
+		return
+	}
+
+	// If key already exists, remove old entry first
+	if elem, exists := c.items[key]; exists {
+		c.removeElement(elem)
+	}
+
+	// Evict LRU entries until we have space
+	c.evictUntilSize(entrySize)
+
+	// Add new entry to front of list
 	entry.Expiry = time.Now().Add(ttl)
-	c.items[key] = entry
-	// Note: Debug logging would require logger injection - skipping for now
+	node := &cacheNode{
+		key:   key,
+		entry: entry,
+		size:  entrySize,
+	}
+	elem := c.lruList.PushFront(node)
+	c.items[key] = elem
+	c.currentSize += entrySize
 }
 
 // delete removes an entry from the cache.
