@@ -208,6 +208,13 @@ func (c *MemoryCache) SaveToFile(filename string) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	// Extract entries from nodes
+	tempItems := make(map[string]CacheEntry, len(c.items))
+	for key, elem := range c.items {
+		node := elem.Value.(*cacheNode)
+		tempItems[key] = node.entry
+	}
+
 	// Ensure the directory exists.
 	dir := filepath.Dir(filename)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -222,7 +229,7 @@ func (c *MemoryCache) SaveToFile(filename string) error {
 	defer os.Remove(tmpFile.Name()) // Clean up the temp file
 
 	encoder := gob.NewEncoder(tmpFile)
-	if err := encoder.Encode(c.items); err != nil {
+	if err := encoder.Encode(tempItems); err != nil {
 		tmpFile.Close()
 		return err
 	}
