@@ -269,9 +269,9 @@ func (c *MemoryCache) PurgeByURL(rawURL string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	_, found := c.items[rawURL]
+	elem, found := c.items[rawURL]
 	if found {
-		delete(c.items, rawURL)
+		c.removeElement(elem)
 	}
 	return found
 }
