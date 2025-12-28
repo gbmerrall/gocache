@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"container/list"
 	"encoding/gob"
 	"net/http"
 	"net/url"
@@ -11,6 +12,13 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+// cacheNode wraps a cache entry with metadata for LRU tracking.
+type cacheNode struct {
+	key   string
+	entry CacheEntry
+	size  int64 // Body size for this entry
+}
 
 // CacheEntry represents a single cached HTTP response.
 type CacheEntry struct {
@@ -29,14 +37,19 @@ type CacheStats struct {
 	UptimeSeconds float64
 }
 
-// MemoryCache is a thread-safe in-memory cache for HTTP responses.
+// MemoryCache is a thread-safe in-memory cache for HTTP responses with LRU eviction.
 type MemoryCache struct {
-	mu         sync.RWMutex
-	items      map[string]CacheEntry
-	defaultTTL time.Duration
-	startTime  time.Time
-	hits       atomic.Uint64
-	misses     atomic.Uint64
+	mu          sync.RWMutex
+	items       map[string]*list.Element // Maps key -> list element
+	lruList     *list.List               // Doubly-linked list for LRU order (head=recent, tail=old)
+	currentSize int64                    // Total size of all cached bodies in bytes
+	maxSize     int64                    // Maximum cache size in bytes (0 = unlimited)
+	defaultTTL  time.Duration
+	startTime   time.Time
+	hits        atomic.Uint64
+	misses      atomic.Uint64
+	evictions   atomic.Uint64 // Number of LRU evictions
+	stopCleanup chan struct{}  // Signal to stop background cleanup goroutine
 }
 
 // NewMemoryCache creates a new MemoryCache with a default TTL for entries.
