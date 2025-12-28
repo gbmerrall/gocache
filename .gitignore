@@ -160,3 +160,4 @@ local-cache/
 # ignore binaries
 binaries/gocache*
 
+.worktrees/
