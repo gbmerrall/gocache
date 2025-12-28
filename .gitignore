@@ -48,7 +48,7 @@ tmp/
 # Cache and data directories
 .cache/
 data/
-cache/
+/cache/
 
 # Configuration files with sensitive data (optional - uncomment if needed)
 # *.key

@@ -1,0 +1,215 @@
+package cache
+
+import (
+	"encoding/gob"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+// CacheEntry represents a single cached HTTP response.
+type CacheEntry struct {
+	StatusCode int
+	Headers    http.Header
+	Body       []byte
+	Expiry     time.Time
+}
+
+// CacheStats holds statistics about the cache's performance.
+type CacheStats struct {
+	Hits          uint64
+	Misses        uint64
+	EntryCount    int
+	TotalSize     int64
+	UptimeSeconds float64
+}
+
+// MemoryCache is a thread-safe in-memory cache for HTTP responses.
+type MemoryCache struct {
+	mu         sync.RWMutex
+	items      map[string]CacheEntry
+	defaultTTL time.Duration
+	startTime  time.Time
+	hits       atomic.Uint64
+	misses     atomic.Uint64
+}
+
+// NewMemoryCache creates a new MemoryCache with a default TTL for entries.
+func NewMemoryCache(defaultTTL time.Duration) *MemoryCache {
+	return &MemoryCache{
+		items:      make(map[string]CacheEntry),
+		defaultTTL: defaultTTL,
+		startTime:  time.Now(),
+	}
+}
+
+// Get retrieves a CacheEntry from the cache.
+func (c *MemoryCache) Get(key string) (CacheEntry, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	entry, found := c.items[key]
+	if !found || time.Now().After(entry.Expiry) {
+		if found {
+			go c.delete(key)
+		}
+		c.misses.Add(1)
+		return CacheEntry{}, false
+	}
+
+	c.hits.Add(1)
+	return entry, true
+}
+
+// Set adds a CacheEntry to the cache.
+func (c *MemoryCache) Set(key string, entry CacheEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	entry.Expiry = time.Now().Add(c.defaultTTL)
+	c.items[key] = entry
+	// Note: Debug logging would require logger injection - skipping for now
+}
+
+// SetWithTTL adds a CacheEntry to the cache with a custom TTL.
+func (c *MemoryCache) SetWithTTL(key string, entry CacheEntry, ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	entry.Expiry = time.Now().Add(ttl)
+	c.items[key] = entry
+	// Note: Debug logging would require logger injection - skipping for now
+}
+
+// delete removes an entry from the cache.
+func (c *MemoryCache) delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.items, key)
+}
+
+// GetStats returns the current statistics for the cache.
+func (c *MemoryCache) GetStats() CacheStats {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var totalSize int64
+	for _, item := range c.items {
+		totalSize += int64(len(item.Body))
+	}
+
+	return CacheStats{
+		Hits:          c.hits.Load(),
+		Misses:        c.misses.Load(),
+		EntryCount:    len(c.items),
+		TotalSize:     totalSize,
+		UptimeSeconds: time.Since(c.startTime).Seconds(),
+	}
+}
+
+// UpdateTTL updates the default TTL for new cache entries.
+func (c *MemoryCache) UpdateTTL(newTTL time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.defaultTTL = newTTL
+}
+
+// SaveToFile saves the cache to a file atomically.
+func (c *MemoryCache) SaveToFile(filename string) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Ensure the directory exists.
+	dir := filepath.Dir(filename)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	// Write to a temporary file first.
+	tmpFile, err := os.CreateTemp(dir, "gocache-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpFile.Name()) // Clean up the temp file
+
+	encoder := gob.NewEncoder(tmpFile)
+	if err := encoder.Encode(c.items); err != nil {
+		tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+
+	// Atomically rename the temporary file to the final destination.
+	return os.Rename(tmpFile.Name(), filename)
+}
+
+// LoadFromFile loads the cache from a file.
+func (c *MemoryCache) LoadFromFile(filename string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	decoder := gob.NewDecoder(file)
+	return decoder.Decode(&c.items)
+}
+
+// PurgeAll clears the entire cache and resets statistics.
+func (c *MemoryCache) PurgeAll() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	count := len(c.items)
+	c.items = make(map[string]CacheEntry)
+	c.hits.Store(0)
+	c.misses.Store(0)
+	// Note: Debug logging would require logger injection - skipping for now
+	return count
+}
+
+// PurgeByURL removes a single entry from the cache by its URL.
+func (c *MemoryCache) PurgeByURL(rawURL string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	_, found := c.items[rawURL]
+	if found {
+		delete(c.items, rawURL)
+	}
+	return found
+}
+
+// PurgeByDomain removes all entries belonging to a specific domain.
+func (c *MemoryCache) PurgeByDomain(domain string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	count := 0
+	keysToDelete := []string{}
+	for key := range c.items {
+		u, err := url.Parse(key)
+		if err != nil {
+			continue
+		}
+		if strings.HasPrefix(u.Host, domain) {
+			keysToDelete = append(keysToDelete, key)
+		}
+	}
+
+	for _, key := range keysToDelete {
+		delete(c.items, key)
+		count++
+	}
+	return count
+}
