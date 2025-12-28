@@ -93,6 +93,43 @@ func (c *MemoryCache) Get(key string) (CacheEntry, bool) {
 	return node.entry, true
 }
 
+// removeElement removes an element from both the list and map.
+// Must be called with lock held.
+func (c *MemoryCache) removeElement(elem *list.Element) {
+	node := elem.Value.(*cacheNode)
+	c.lruList.Remove(elem)
+	delete(c.items, node.key)
+	c.currentSize -= node.size
+}
+
+// evictLRU removes the least recently used entry from the cache.
+// Returns true if an entry was evicted, false if cache was empty.
+// Must be called with lock held.
+func (c *MemoryCache) evictLRU() bool {
+	elem := c.lruList.Back()
+	if elem == nil {
+		return false
+	}
+
+	c.removeElement(elem)
+	c.evictions.Add(1)
+	return true
+}
+
+// evictUntilSize evicts entries until currentSize + neededSize <= maxSize.
+// Must be called with lock held.
+func (c *MemoryCache) evictUntilSize(neededSize int64) {
+	if c.maxSize == 0 {
+		return // Unlimited cache
+	}
+
+	for c.currentSize+neededSize > c.maxSize {
+		if !c.evictLRU() {
+			break // Cache is empty
+		}
+	}
+}
+
 // Set adds a CacheEntry to the cache.
 func (c *MemoryCache) Set(key string, entry CacheEntry) {
 	c.mu.Lock()
