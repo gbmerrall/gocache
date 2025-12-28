@@ -282,19 +282,20 @@ func (c *MemoryCache) PurgeByDomain(domain string) int {
 	defer c.mu.Unlock()
 
 	count := 0
-	keysToDelete := []string{}
-	for key := range c.items {
+	elemsToDelete := []*list.Element{}
+
+	for key, elem := range c.items {
 		u, err := url.Parse(key)
 		if err != nil {
 			continue
 		}
 		if strings.HasPrefix(u.Host, domain) {
-			keysToDelete = append(keysToDelete, key)
+			elemsToDelete = append(elemsToDelete, elem)
 		}
 	}
 
-	for _, key := range keysToDelete {
-		delete(c.items, key)
+	for _, elem := range elemsToDelete {
+		c.removeElement(elem)
 		count++
 	}
 	return count
