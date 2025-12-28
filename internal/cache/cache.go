@@ -255,10 +255,12 @@ func (c *MemoryCache) PurgeAll() int {
 	defer c.mu.Unlock()
 
 	count := len(c.items)
-	c.items = make(map[string]CacheEntry)
+	c.items = make(map[string]*list.Element)
+	c.lruList = list.New()
+	c.currentSize = 0
 	c.hits.Store(0)
 	c.misses.Store(0)
-	// Note: Debug logging would require logger injection - skipping for now
+	c.evictions.Store(0)
 	return count
 }
 
