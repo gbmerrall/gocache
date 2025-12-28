@@ -300,3 +300,44 @@ func (c *MemoryCache) PurgeByDomain(domain string) int {
 	}
 	return count
 }
+
+// cleanupExpired runs periodically to remove expired entries.
+// Runs in background goroutine started by NewMemoryCache.
+func (c *MemoryCache) cleanupExpired() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.removeExpiredEntries()
+		case <-c.stopCleanup:
+			return
+		}
+	}
+}
+
+// removeExpiredEntries scans cache and removes expired entries.
+func (c *MemoryCache) removeExpiredEntries() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	elemsToDelete := []*list.Element{}
+
+	for _, elem := range c.items {
+		node := elem.Value.(*cacheNode)
+		if now.After(node.entry.Expiry) {
+			elemsToDelete = append(elemsToDelete, elem)
+		}
+	}
+
+	for _, elem := range elemsToDelete {
+		c.removeElement(elem)
+	}
+}
+
+// Shutdown gracefully stops the background cleanup goroutine.
+func (c *MemoryCache) Shutdown() {
+	close(c.stopCleanup)
+}
