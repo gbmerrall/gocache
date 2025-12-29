@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"container/list"
 	"context"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -16,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gbmerrall/gocache/internal/cache"
@@ -23,6 +25,12 @@ import (
 	"github.com/gbmerrall/gocache/internal/config"
 	"github.com/gbmerrall/gocache/internal/logging"
 )
+
+// certNode wraps a certificate with metadata for LRU tracking.
+type certNode struct {
+	host string
+	cert *tls.Certificate
+}
 
 // Proxy is the main proxy server struct.
 type Proxy struct {
@@ -35,8 +43,10 @@ type Proxy struct {
 	server    *http.Server
 	transport http.RoundTripper
 
-	certCache   map[string]*tls.Certificate
-	certCacheMu sync.RWMutex
+	certCache     map[string]*list.Element // Maps hostname -> list element
+	certLRUList   *list.List               // Doubly-linked list (head=recent, tail=old)
+	certCacheMu   sync.RWMutex
+	certEvictions atomic.Uint64 // Eviction counter for metrics
 }
 
 // NewProxy creates a new Proxy server.
@@ -73,14 +83,15 @@ func NewProxy(logger *slog.Logger, c *cache.MemoryCache, cfg *config.Config) (*P
 	}
 
 	p := &Proxy{
-		logger:    logger,
-		config:    cfg,
-		cache:     c,
-		accessLog: accessLog,
-		ca:        ca,
-		caPrivKey: caPrivKey,
-		certCache: make(map[string]*tls.Certificate),
-		transport: http.DefaultTransport,
+		logger:      logger,
+		config:      cfg,
+		cache:       c,
+		accessLog:   accessLog,
+		ca:          ca,
+		caPrivKey:   caPrivKey,
+		certCache:   make(map[string]*list.Element),
+		certLRUList: list.New(),
+		transport:   http.DefaultTransport,
 	}
 	p.server = &http.Server{Handler: p}
 	return p, nil
@@ -613,18 +624,20 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 
 func (p *Proxy) getCert(host string) (*tls.Certificate, error) {
 	p.certCacheMu.RLock()
-	if cert, ok := p.certCache[host]; ok {
+	if elem, ok := p.certCache[host]; ok {
+		node := elem.Value.(*certNode)
 		p.certCacheMu.RUnlock()
 		p.logger.Debug("certificate cache hit", "host", host)
-		return cert, nil
+		return node.cert, nil
 	}
 	p.certCacheMu.RUnlock()
 	p.logger.Debug("certificate cache miss, generating new cert", "host", host)
 
 	p.certCacheMu.Lock()
 	defer p.certCacheMu.Unlock()
-	if cert, ok := p.certCache[host]; ok {
-		return cert, nil
+	if elem, ok := p.certCache[host]; ok {
+		node := elem.Value.(*certNode)
+		return node.cert, nil
 	}
 
 	hostCert, hostKey, err := cert.GenerateHostCert(p.ca, p.caPrivKey, host)
@@ -638,7 +651,13 @@ func (p *Proxy) getCert(host string) (*tls.Certificate, error) {
 		Certificate: [][]byte{hostCert.Raw},
 		PrivateKey:  hostKey,
 	}
-	p.certCache[host] = tlsCert
+
+	node := &certNode{
+		host: host,
+		cert: tlsCert,
+	}
+	elem := p.certLRUList.PushFront(node)
+	p.certCache[host] = elem
 	p.logger.Debug("certificate cached", "host", host, "cacheSize", len(p.certCache))
 	return tlsCert, nil
 }

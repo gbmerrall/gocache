@@ -947,3 +947,29 @@ func TestProxyPostCaching(t *testing.T) {
 		resp5.Body.Close()
 	})
 }
+
+func TestCertCacheLRUDataStructures(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-lru")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	cfg := config.NewDefaultConfig()
+	c := cache.NewMemoryCache(5*time.Minute, 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	proxy, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	// Verify LRU structures initialized
+	if proxy.certLRUList == nil {
+		t.Fatal("certLRUList not initialized")
+	}
+	if proxy.certCache == nil {
+		t.Fatal("certCache not initialized")
+	}
+}
