@@ -125,6 +125,70 @@ negative_ttl = "30s"
 	})
 }
 
+func TestConfigMaxCertCacheEntries(t *testing.T) {
+	t.Run("Custom value", func(t *testing.T) {
+		tomlData := `
+[server]
+proxy_port = 8080
+control_port = 8081
+bind_address = "localhost"
+max_cert_cache_entries = 500
+`
+		tmpFile, err := os.CreateTemp("", "config-*.toml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		if _, err := tmpFile.WriteString(tomlData); err != nil {
+			t.Fatal(err)
+		}
+		tmpFile.Close()
+
+		cfg, err := LoadConfig(tmpFile.Name())
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		if cfg.Server.MaxCertCacheEntries != 500 {
+			t.Fatalf("expected MaxCertCacheEntries=500, got %d", cfg.Server.MaxCertCacheEntries)
+		}
+	})
+
+	t.Run("Default value", func(t *testing.T) {
+		cfg := NewDefaultConfig()
+		if cfg.Server.MaxCertCacheEntries != 1000 {
+			t.Fatalf("expected default MaxCertCacheEntries=1000, got %d", cfg.Server.MaxCertCacheEntries)
+		}
+	})
+
+	t.Run("Zero value for unlimited", func(t *testing.T) {
+		tomlData := `
+[server]
+max_cert_cache_entries = 0
+`
+		tmpFile, err := os.CreateTemp("", "config-*.toml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		if _, err := tmpFile.WriteString(tomlData); err != nil {
+			t.Fatal(err)
+		}
+		tmpFile.Close()
+
+		cfg, err := LoadConfig(tmpFile.Name())
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		if cfg.Server.MaxCertCacheEntries != 0 {
+			t.Fatalf("expected MaxCertCacheEntries=0, got %d", cfg.Server.MaxCertCacheEntries)
+		}
+	})
+}
+
 func TestPostCacheConfig(t *testing.T) {
 	t.Run("Defaults", func(t *testing.T) {
 		cfg := NewDefaultConfig()

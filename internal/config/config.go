@@ -22,9 +22,10 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	ProxyPort   int    `toml:"proxy_port"`
-	ControlPort int    `toml:"control_port"`
-	BindAddress string `toml:"bind_address"`
+	ProxyPort           int    `toml:"proxy_port"`
+	ControlPort         int    `toml:"control_port"`
+	BindAddress         string `toml:"bind_address"`
+	MaxCertCacheEntries int    `toml:"max_cert_cache_entries"`
 }
 
 type PostCacheConfig struct {
@@ -136,9 +137,10 @@ func NewDefaultConfig() *Config {
 
 	return &Config{
 		Server: ServerConfig{
-			ProxyPort:   8080,
-			ControlPort: 8081,
-			BindAddress: "127.0.0.1",
+			ProxyPort:           8080,
+			ControlPort:         8081,
+			BindAddress:         "127.0.0.1",
+			MaxCertCacheEntries: 1000,
 		},
 		Cache: CacheConfig{
 			DefaultTTL:    "1h",

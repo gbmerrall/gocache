@@ -3,6 +3,11 @@ proxy_port = 8080
 control_port = 8081
 bind_address = "127.0.0.1"
 
+# Maximum number of TLS certificates to cache. Each certificate is ~1-2KB.
+# Default: 1000 certificates ≈ 1-2MB memory
+# Set to 0 for unlimited (not recommended for production)
+max_cert_cache_entries = 1000
+
 [cache]
 # Normal cache TTL for successful responses (2xx, 3xx)
 default_ttl = "1h"
