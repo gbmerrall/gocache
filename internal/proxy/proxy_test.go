@@ -973,3 +973,31 @@ func TestCertCacheLRUDataStructures(t *testing.T) {
 		t.Fatal("certCache not initialized")
 	}
 }
+
+func TestNewProxyInitializesCertLRU(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-init")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	cfg := config.NewDefaultConfig()
+	c := cache.NewMemoryCache(5*time.Minute, 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	proxy, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	if proxy.certCache == nil {
+		t.Fatal("certCache map not initialized")
+	}
+	if proxy.certLRUList == nil {
+		t.Fatal("certLRUList not initialized")
+	}
+	if proxy.certLRUList.Len() != 0 {
+		t.Fatalf("expected empty LRU list, got %d entries", proxy.certLRUList.Len())
+	}
+}
