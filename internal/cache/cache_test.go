@@ -525,3 +525,46 @@ func TestMemoryCache_ConcurrentAccess(t *testing.T) {
 		t.Error("Invalid entry count")
 	}
 }
+
+func TestMemoryCache_BackgroundCleanup(t *testing.T) {
+	cache := NewMemoryCache(100*time.Millisecond, 10) // Short TTL
+	defer cache.Shutdown()
+
+	// Add entries that will expire
+	cache.Set("key1", CacheEntry{Body: []byte("data1")})
+	cache.Set("key2", CacheEntry{Body: []byte("data2")})
+
+	stats := cache.GetStats()
+	if stats.EntryCount != 2 {
+		t.Errorf("Expected 2 entries, got %d", stats.EntryCount)
+	}
+
+	// Wait for expiration + cleanup cycle
+	// Since cleanup runs every 1 minute, we test expiration via Get() which checks expiry
+	time.Sleep(200 * time.Millisecond)
+
+	// Entries should be expired (Get will remove them)
+	_, found1 := cache.Get("key1")
+	_, found2 := cache.Get("key2")
+	if found1 || found2 {
+		t.Error("Expected entries to be expired")
+	}
+
+	stats = cache.GetStats()
+	if stats.EntryCount != 0 {
+		t.Errorf("Expected 0 entries after expiration, got %d", stats.EntryCount)
+	}
+}
+
+func TestMemoryCache_Shutdown(t *testing.T) {
+	cache := NewMemoryCache(1*time.Hour, 10)
+
+	// Add some entries
+	cache.Set("key1", CacheEntry{Body: []byte("data")})
+
+	// Shutdown should not panic
+	cache.Shutdown()
+
+	// Verify cleanup goroutine stopped (no way to directly test, but Shutdown should return)
+	// If it blocks, test will timeout
+}
