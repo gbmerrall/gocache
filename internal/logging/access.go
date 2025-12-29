@@ -17,8 +17,8 @@ type AccessLogEntry struct {
 	CacheStatus string // "HIT", "MISS", or "" for non-cacheable
 	Status      int
 	Method      string
-	Size        int64  // Response size in bytes
-	Duration    int64  // Response time in milliseconds
+	Size        int64 // Response size in bytes
+	Duration    int64 // Response time in milliseconds
 	URL         string
 	ContentType string
 }
@@ -38,15 +38,15 @@ type AccessLogger struct {
 	done    chan struct{}
 	wg      sync.WaitGroup
 	closed  bool
-	
+
 	// Configuration
-	format      AccessLogFormat
+	format        AccessLogFormat
 	stdoutEnabled bool
-	fileWriter   io.WriteCloser
-	
+	fileWriter    io.WriteCloser
+
 	// Error handling
 	errorHandler func(error)
-	
+
 	// Metrics (protected by mu)
 	entriesLogged  uint64
 	entriesDropped uint64
@@ -58,7 +58,7 @@ type AccessLoggerConfig struct {
 	Format        AccessLogFormat
 	StdoutEnabled bool
 	LogFile       string
-	BufferSize    int // Channel buffer size, default 1000
+	BufferSize    int         // Channel buffer size, default 1000
 	ErrorHandler  func(error) // Optional error handler
 }
 
@@ -70,7 +70,7 @@ func NewAccessLogger(config AccessLoggerConfig) (*AccessLogger, error) {
 	if config.BufferSize <= 0 {
 		config.BufferSize = 1000
 	}
-	
+
 	logger := &AccessLogger{
 		entries:       make(chan AccessLogEntry, config.BufferSize),
 		done:          make(chan struct{}),
@@ -78,7 +78,7 @@ func NewAccessLogger(config AccessLoggerConfig) (*AccessLogger, error) {
 		stdoutEnabled: config.StdoutEnabled,
 		errorHandler:  config.ErrorHandler,
 	}
-	
+
 	// Set up file writer if specified - handle errors gracefully
 	if config.LogFile != "" {
 		file, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -94,11 +94,11 @@ func NewAccessLogger(config AccessLoggerConfig) (*AccessLogger, error) {
 			logger.fileWriter = file
 		}
 	}
-	
+
 	// Start background goroutine
 	logger.wg.Add(1)
 	go logger.worker()
-	
+
 	return logger, nil
 }
 
@@ -145,13 +145,13 @@ func (al *AccessLogger) Close() error {
 	}
 	al.closed = true
 	al.mu.Unlock()
-	
+
 	close(al.done)
 	al.wg.Wait()
-	
+
 	al.mu.Lock()
 	defer al.mu.Unlock()
-	
+
 	if al.fileWriter != nil {
 		return al.fileWriter.Close()
 	}
@@ -161,7 +161,7 @@ func (al *AccessLogger) Close() error {
 // worker processes log entries in a background goroutine
 func (al *AccessLogger) worker() {
 	defer al.wg.Done()
-	
+
 	for {
 		select {
 		case entry := <-al.entries:
@@ -184,7 +184,7 @@ func (al *AccessLogger) worker() {
 func (al *AccessLogger) writeEntry(entry AccessLogEntry) {
 	var output string
 	var err error
-	
+
 	switch al.format {
 	case FormatHuman:
 		output = al.formatHuman(entry)
@@ -200,7 +200,7 @@ func (al *AccessLogger) writeEntry(entry AccessLogEntry) {
 		}
 		return
 	}
-	
+
 	// Write to stdout if enabled
 	if al.stdoutEnabled {
 		if _, err := fmt.Fprintln(os.Stdout, output); err != nil {
@@ -212,12 +212,12 @@ func (al *AccessLogger) writeEntry(entry AccessLogEntry) {
 			}
 		}
 	}
-	
+
 	// Write to file if configured
 	al.mu.RLock()
 	fileWriter := al.fileWriter
 	al.mu.RUnlock()
-	
+
 	if fileWriter != nil {
 		if _, err := fmt.Fprintln(fileWriter, output); err != nil {
 			al.mu.Lock()
@@ -242,7 +242,7 @@ func (al *AccessLogger) formatHuman(entry AccessLogEntry) string {
 	if contentType == "" {
 		contentType = `""`
 	}
-	
+
 	return fmt.Sprintf("%s %s %d %s %d %d %s %s",
 		timestamp,
 		cacheStatus,
@@ -276,7 +276,7 @@ func (al *AccessLogger) formatJSON(entry AccessLogEntry) (string, error) {
 		URL:         entry.URL,
 		ContentType: entry.ContentType,
 	}
-	
+
 	data, err := json.Marshal(jsonEntry)
 	if err != nil {
 		return "", err
@@ -333,7 +333,7 @@ type AccessLoggerMetrics struct {
 func (al *AccessLogger) GetMetrics() AccessLoggerMetrics {
 	al.mu.RLock()
 	defer al.mu.RUnlock()
-	
+
 	return AccessLoggerMetrics{
 		EntriesLogged:  al.entriesLogged,
 		EntriesDropped: al.entriesDropped,
@@ -345,7 +345,7 @@ func (al *AccessLogger) GetMetrics() AccessLoggerMetrics {
 func (al *AccessLogger) ResetMetrics() {
 	al.mu.Lock()
 	defer al.mu.Unlock()
-	
+
 	al.entriesLogged = 0
 	al.entriesDropped = 0
 	al.writeErrors = 0

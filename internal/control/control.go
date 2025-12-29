@@ -122,6 +122,7 @@ func (a *ControlAPI) handleShutdown(w http.ResponseWriter, r *http.Request) {
 
 	go a.shutdown()
 }
+
 // ... (rest of the handlers remain the same)
 func (a *ControlAPI) handleStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -136,12 +137,12 @@ func (a *ControlAPI) handleStats(w http.ResponseWriter, r *http.Request) {
 		hitRate = (float64(stats.Hits) / float64(totalRequests)) * 100
 	}
 	response := map[string]interface{}{
-		"hit_count":           stats.Hits,
-		"miss_count":          stats.Misses,
-		"hit_rate_percent":    fmt.Sprintf("%.2f", hitRate),
-		"entry_count":         stats.EntryCount,
-		"uptime_seconds":      fmt.Sprintf("%.2f", stats.UptimeSeconds),
-		"cache_size_bytes":    stats.TotalSize,
+		"hit_count":        stats.Hits,
+		"miss_count":       stats.Misses,
+		"hit_rate_percent": fmt.Sprintf("%.2f", hitRate),
+		"entry_count":      stats.EntryCount,
+		"uptime_seconds":   fmt.Sprintf("%.2f", stats.UptimeSeconds),
+		"cache_size_bytes": stats.TotalSize,
 		"cert_cache_count": a.proxy.GetCertCacheStats(),
 	}
 	w.Header().Set("Content-Type", "application/json")

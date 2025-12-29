@@ -17,7 +17,7 @@ func TestIsForegroundMode(t *testing.T) {
 	// Test convenience function
 	isForeground := IsForegroundMode()
 	expectedMode := DetectProcessMode()
-	
+
 	if isForeground && expectedMode != ProcessModeForeground {
 		t.Error("IsForegroundMode() returned true but DetectProcessMode() returned daemon")
 	}
@@ -47,7 +47,7 @@ func TestProcessDetectionConsistency(t *testing.T) {
 	// Multiple calls should return the same result
 	mode1 := DetectProcessMode()
 	mode2 := DetectProcessMode()
-	
+
 	if mode1 != mode2 {
 		t.Error("DetectProcessMode() returned different results on consecutive calls")
 	}
@@ -58,14 +58,14 @@ func TestProcessDetectionIndicators(t *testing.T) {
 	// When running tests, we expect to be in foreground mode typically
 	// This is a soft assertion since test environments can vary
 	mode := DetectProcessMode()
-	
+
 	// Check if we can access /dev/tty
 	_, err := os.Open("/dev/tty")
 	hasTty := err == nil
-	
+
 	if hasTty && mode == ProcessModeDaemon {
 		t.Logf("Warning: have controlling terminal but detected daemon mode - this may be test environment specific")
 	}
-	
+
 	t.Logf("Process mode detected: %s, has TTY: %v", mode.String(), hasTty)
 }

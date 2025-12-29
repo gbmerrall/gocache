@@ -31,14 +31,14 @@ func TestAccessLoggingSimple(t *testing.T) {
 	// Create proxy with a mock transport
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	memCache := cache.NewMemoryCache(100*time.Millisecond, 0)
-	
+
 	proxy := &Proxy{
 		logger:    logger,
 		config:    cfg,
 		cache:     memCache,
 		transport: &mockTransport{},
 	}
-	
+
 	// Initialize access logger using the logic from NewProxy
 	cfg.Logging.ApplyProcessDetection(false) // Force daemon mode for tests
 	if cfg.Logging.AccessToStdout || cfg.Logging.AccessLogfile != "" {
@@ -132,14 +132,14 @@ func TestAccessLoggingJSON(t *testing.T) {
 	// Create proxy with mock transport
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	memCache := cache.NewMemoryCache(100*time.Millisecond, 0)
-	
+
 	proxy := &Proxy{
 		logger:    logger,
 		config:    cfg,
 		cache:     memCache,
 		transport: &mockTransport{},
 	}
-	
+
 	// Initialize access logger
 	cfg.Logging.ApplyProcessDetection(false)
 	accessLogConfig := logging.AccessLoggerConfig{
@@ -207,14 +207,14 @@ func TestAccessLoggingDisabled(t *testing.T) {
 	// Create proxy with mock transport
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	memCache := cache.NewMemoryCache(100*time.Millisecond, 0)
-	
+
 	proxy := &Proxy{
 		logger:    logger,
 		config:    cfg,
 		cache:     memCache,
 		transport: &mockTransport{},
 	}
-	
+
 	// Initialize access logger (should be nil)
 	cfg.Logging.ApplyProcessDetection(false)
 	if cfg.Logging.AccessToStdout || cfg.Logging.AccessLogfile != "" {

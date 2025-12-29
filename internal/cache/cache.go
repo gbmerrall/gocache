@@ -32,10 +32,10 @@ type CacheEntry struct {
 type CacheStats struct {
 	Hits          uint64
 	Misses        uint64
-	Evictions     uint64  // LRU evictions due to size limit
+	Evictions     uint64 // LRU evictions due to size limit
 	EntryCount    int
-	TotalSize     int64   // Current total size in bytes
-	MaxSize       int64   // Configured maximum size in bytes
+	TotalSize     int64 // Current total size in bytes
+	MaxSize       int64 // Configured maximum size in bytes
 	UptimeSeconds float64
 }
 
@@ -51,7 +51,7 @@ type MemoryCache struct {
 	hits        atomic.Uint64
 	misses      atomic.Uint64
 	evictions   atomic.Uint64 // Number of LRU evictions
-	stopCleanup chan struct{}  // Signal to stop background cleanup goroutine
+	stopCleanup chan struct{} // Signal to stop background cleanup goroutine
 }
 
 // NewMemoryCache creates a new MemoryCache with a default TTL and maximum size.

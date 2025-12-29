@@ -12,7 +12,7 @@ import (
 func TestAccessLoggerResilience(t *testing.T) {
 	t.Run("readonly_directory", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		
+
 		// Make directory readonly
 		err := os.Chmod(tmpDir, 0555)
 		if err != nil {
@@ -41,7 +41,7 @@ func TestAccessLoggerResilience(t *testing.T) {
 			t.Errorf("NewAccessLogger should not return error for readonly directory, got: %v", err)
 		}
 		defer logger.Close()
-		
+
 		// Verify that an error was reported through the error handler
 		if receivedError == nil {
 			t.Error("expected error to be reported through error handler for readonly directory")
@@ -104,7 +104,7 @@ func TestAccessLoggerResilience(t *testing.T) {
 			t.Errorf("NewAccessLogger should not return error for removed directory, got: %v", err)
 		}
 		defer logger2.Close()
-		
+
 		// Verify that an error was reported through the error handler
 		if receivedError == nil {
 			t.Error("expected error to be reported through error handler for removed directory")

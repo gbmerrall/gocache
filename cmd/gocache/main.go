@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"github.com/gbmerrall/gocache/internal/cache"
+	"github.com/gbmerrall/gocache/internal/cli"
 	"github.com/gbmerrall/gocache/internal/config"
 	"github.com/gbmerrall/gocache/internal/control"
 	"github.com/gbmerrall/gocache/internal/pidfile"
 	"github.com/gbmerrall/gocache/internal/proxy"
-	"github.com/gbmerrall/gocache/internal/cli"
 )
 
 var exit = os.Exit
@@ -69,7 +69,6 @@ func run(args []string) error {
 	return nil
 }
 
-
 func startServer(configPath, logLevelOverride string, testShutdown ...func()) {
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
@@ -80,12 +79,12 @@ func startServer(configPath, logLevelOverride string, testShutdown ...func()) {
 	// Get effective application logging settings
 	appLevel := cfg.Logging.GetEffectiveAppLevel()
 	appLogfile := cfg.Logging.GetEffectiveAppLogfile()
-	
+
 	// Override with command line if provided
 	if logLevelOverride != "" {
 		appLevel = logLevelOverride
 	}
-	
+
 	// If application logging is disabled, create a no-op logger
 	var logger *slog.Logger
 	if appLevel == "" {

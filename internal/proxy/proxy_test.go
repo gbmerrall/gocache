@@ -28,7 +28,7 @@ func setupProxyTest(t *testing.T) (*httptest.Server, *http.Client, *cache.Memory
 	cert.SetCertDir(tmpDir)
 
 	cfg := config.NewDefaultConfig()
-	c := cache.NewMemoryCache(1 * time.Minute, 0)
+	c := cache.NewMemoryCache(1*time.Minute, 0)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	p, err := NewProxy(logger, c, cfg)
 	if err != nil {
@@ -145,7 +145,7 @@ func setupTestProxy(t *testing.T) (*Proxy, func()) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := config.NewDefaultConfig()
-	c := cache.NewMemoryCache(1 * time.Minute, 0)
+	c := cache.NewMemoryCache(1*time.Minute, 0)
 
 	p, err := NewProxy(logger, c, cfg)
 	if err != nil {
@@ -168,7 +168,7 @@ func TestNewProxy(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := config.NewDefaultConfig()
-	c := cache.NewMemoryCache(1 * time.Minute, 0)
+	c := cache.NewMemoryCache(1*time.Minute, 0)
 
 	proxy, err := NewProxy(logger, c, cfg)
 	if err != nil {
@@ -599,15 +599,15 @@ func TestNegativeTTL(t *testing.T) {
 		defer os.RemoveAll(tmpDir)
 
 		cert.SetCertDir(tmpDir)
-		
+
 		// Configure with very short negative TTL for testing
 		cfg := config.NewDefaultConfig()
 		cfg.Cache.DefaultTTL = "1h"
 		cfg.Cache.NegativeTTL = "50ms" // Very short for testing
-		
+
 		c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL(), cfg.Cache.MaxSizeMB)
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-		
+
 		p, err := NewProxy(logger, c, cfg)
 		if err != nil {
 			t.Fatalf("failed to create proxy: %v", err)
@@ -669,15 +669,15 @@ func TestNegativeTTL(t *testing.T) {
 		defer os.RemoveAll(tmpDir)
 
 		cert.SetCertDir(tmpDir)
-		
+
 		// Configure with very short negative TTL but longer default TTL
 		cfg := config.NewDefaultConfig()
 		cfg.Cache.DefaultTTL = "200ms" // Short for testing but longer than negative
 		cfg.Cache.NegativeTTL = "50ms"
-		
+
 		c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL(), cfg.Cache.MaxSizeMB)
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-		
+
 		p, err := NewProxy(logger, c, cfg)
 		if err != nil {
 			t.Fatalf("failed to create proxy: %v", err)
@@ -726,13 +726,13 @@ func TestNegativeTTL(t *testing.T) {
 		}{
 			{200, false}, // 2xx - success
 			{201, false},
-			{301, false}, // 3xx - redirect  
+			{301, false}, // 3xx - redirect
 			{302, false},
-			{400, true},  // 4xx - client error
+			{400, true}, // 4xx - client error
 			{401, true},
 			{404, true},
 			{403, true},
-			{500, true},  // 5xx - server error
+			{500, true}, // 5xx - server error
 			{501, true},
 			{502, true},
 			{503, true},
@@ -762,7 +762,7 @@ func setupPostCacheTest(t *testing.T, cfg *config.Config) (*httptest.Server, *ht
 		cfg = config.NewDefaultConfig()
 	}
 
-	c := cache.NewMemoryCache(1 * time.Minute, 0)
+	c := cache.NewMemoryCache(1*time.Minute, 0)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	p, err := NewProxy(logger, c, cfg)
 	if err != nil {

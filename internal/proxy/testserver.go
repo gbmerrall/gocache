@@ -20,52 +20,52 @@ type TestServer struct {
 // NewTestServer creates a new test server with predefined endpoints for testing various scenarios
 func NewTestServer() *TestServer {
 	ts := &TestServer{}
-	
+
 	mux := http.NewServeMux()
-	
+
 	// Basic cacheable content
 	mux.HandleFunc("/cacheable", ts.handleCacheable)
 	mux.HandleFunc("/cacheable-json", ts.handleCacheableJSON)
 	mux.HandleFunc("/cacheable-css", ts.handleCacheableCSS)
 	mux.HandleFunc("/cacheable-js", ts.handleCacheableJS)
-	
+
 	// Non-cacheable content
 	mux.HandleFunc("/non-cacheable", ts.handleNonCacheable)
 	mux.HandleFunc("/binary", ts.handleBinary)
 	mux.HandleFunc("/image", ts.handleImage)
-	
+
 	// Error responses
 	mux.HandleFunc("/error/400", ts.handleError400)
 	mux.HandleFunc("/error/404", ts.handleError404)
 	mux.HandleFunc("/error/500", ts.handleError500)
 	mux.HandleFunc("/error/503", ts.handleError503)
-	
+
 	// Redirects
 	mux.HandleFunc("/redirect/301", ts.handleRedirect301)
 	mux.HandleFunc("/redirect/302", ts.handleRedirect302)
 	mux.HandleFunc("/redirect/target", ts.handleRedirectTarget)
-	
+
 	// Cache control headers
 	mux.HandleFunc("/no-cache", ts.handleNoCache)
 	mux.HandleFunc("/max-age", ts.handleMaxAge)
 	mux.HandleFunc("/expires", ts.handleExpires)
-	
+
 	// Dynamic content (changes on each request)
 	mux.HandleFunc("/dynamic", ts.handleDynamic)
 	mux.HandleFunc("/timestamp", ts.handleTimestamp)
-	
+
 	// Slow responses for timeout testing
 	mux.HandleFunc("/slow", ts.handleSlow)
-	
+
 	// Large responses
 	mux.HandleFunc("/large", ts.handleLarge)
-	
+
 	// Custom headers testing
 	mux.HandleFunc("/headers", ts.handleHeaders)
-	
+
 	// Request counting
 	mux.HandleFunc("/counter", ts.handleCounter)
-	
+
 	ts.Server = httptest.NewServer(mux)
 	return ts
 }
@@ -73,9 +73,9 @@ func NewTestServer() *TestServer {
 // NewTestTLSServer creates a new TLS test server
 func NewTestTLSServer() *TestServer {
 	ts := &TestServer{}
-	
+
 	mux := http.NewServeMux()
-	
+
 	// Same handlers as HTTP version
 	mux.HandleFunc("/cacheable", ts.handleCacheable)
 	mux.HandleFunc("/cacheable-json", ts.handleCacheableJSON)
@@ -86,7 +86,7 @@ func NewTestTLSServer() *TestServer {
 	mux.HandleFunc("/dynamic", ts.handleDynamic)
 	mux.HandleFunc("/slow", ts.handleSlow)
 	mux.HandleFunc("/counter", ts.handleCounter)
-	
+
 	ts.Server = httptest.NewTLSServer(mux)
 	return ts
 }
@@ -279,7 +279,7 @@ func (ts *TestServer) handleDynamic(w http.ResponseWriter, r *http.Request) {
 	count := atomic.AddInt64(&ts.requestCount, 1)
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("<html><body>Request #%d at %d</body></html>", 
+	w.Write([]byte(fmt.Sprintf("<html><body>Request #%d at %d</body></html>",
 		count, time.Now().Unix())))
 }
 
@@ -304,7 +304,7 @@ func (ts *TestServer) handleSlow(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	time.Sleep(time.Duration(delay) * time.Millisecond)
-	
+
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(fmt.Sprintf("<html><body>Slow response after %dms</body></html>", delay)))
@@ -314,7 +314,7 @@ func (ts *TestServer) handleSlow(w http.ResponseWriter, r *http.Request) {
 func (ts *TestServer) handleLarge(w http.ResponseWriter, r *http.Request) {
 	ts.applyDelay()
 	ts.incrementCounter()
-	
+
 	// Extract size from query parameter or use default
 	sizeStr := r.URL.Query().Get("size")
 	size := 1024 * 1024 // default 1MB
@@ -323,10 +323,10 @@ func (ts *TestServer) handleLarge(w http.ResponseWriter, r *http.Request) {
 			size = s
 		}
 	}
-	
+
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
-	
+
 	// Generate large content
 	chunk := strings.Repeat("A", 1024) // 1KB chunks
 	remaining := size
@@ -344,18 +344,18 @@ func (ts *TestServer) handleLarge(w http.ResponseWriter, r *http.Request) {
 func (ts *TestServer) handleHeaders(w http.ResponseWriter, r *http.Request) {
 	ts.applyDelay()
 	ts.incrementCounter()
-	
+
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Echo back request headers
 	for key, values := range r.Header {
 		for _, value := range values {
 			w.Header().Add("X-Echo-"+key, value)
 		}
 	}
-	
+
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf(`{"method": "%s", "path": "%s", "host": "%s"}`, 
+	w.Write([]byte(fmt.Sprintf(`{"method": "%s", "path": "%s", "host": "%s"}`,
 		r.Method, r.URL.Path, r.Host)))
 }
 

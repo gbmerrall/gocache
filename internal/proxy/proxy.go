@@ -26,14 +26,14 @@ import (
 
 // Proxy is the main proxy server struct.
 type Proxy struct {
-	logger      *slog.Logger
-	config      *config.Config
-	cache       *cache.MemoryCache
-	accessLog   *logging.AccessLogger
-	ca          *x509.Certificate
-	caPrivKey   *rsa.PrivateKey
-	server      *http.Server
-	transport   http.RoundTripper
+	logger    *slog.Logger
+	config    *config.Config
+	cache     *cache.MemoryCache
+	accessLog *logging.AccessLogger
+	ca        *x509.Certificate
+	caPrivKey *rsa.PrivateKey
+	server    *http.Server
+	transport http.RoundTripper
 
 	certCache   map[string]*tls.Certificate
 	certCacheMu sync.RWMutex
@@ -132,7 +132,7 @@ func (p *Proxy) logAccess(startTime time.Time, r *http.Request, statusCode int, 
 			}
 			fullURL = scheme + "://" + r.Host + r.URL.String()
 		}
-		
+
 		p.accessLog.LogRequest(r.Method, fullURL, cacheStatus, statusCode, responseSize, duration, contentType)
 	}
 }
@@ -233,10 +233,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
-	
+
 	// Wrap response writer for access logging
 	crw := logging.NewCountingResponseWriter(w)
-	
+
 	p.logger.Info("http request", "method", r.Method, "url", r.URL)
 	p.logger.Debug("http request details", "headers", r.Header, "contentLength", r.ContentLength)
 
@@ -268,7 +268,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			crw.WriteHeader(entry.StatusCode)
 			crw.Write(entry.Body)
-			
+
 			// Log access for cached response
 			contentType := crw.Header().Get("Content-Type")
 			p.logAccess(startTime, r, crw.StatusCode(), crw.Size(), "HIT", contentType)
@@ -351,7 +351,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	crw.WriteHeader(resp.StatusCode)
 	crw.Write(body)
-	
+
 	// Log access for successful response
 	contentType := crw.Header().Get("Content-Type")
 	p.logAccess(startTime, r, crw.StatusCode(), crw.Size(), cacheStatus, contentType)
@@ -446,7 +446,7 @@ func (p *Proxy) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 
 func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
-	
+
 	p.logger.Info("https request", "host", r.Host)
 	p.logger.Debug("https connect request details", "method", r.Method, "host", r.Host, "userAgent", r.Header.Get("User-Agent"))
 
@@ -493,7 +493,7 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 
 	req.URL.Scheme = "https"
 	req.URL.Host = r.Host
-	
+
 	// Only check cache for cacheable request methods
 	var cacheKey string
 	var fromCache bool
@@ -563,7 +563,7 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			Headers:    resp.Header,
 			Body:       body,
 		}
-		
+
 		// Use negative TTL for error status codes (4xx, 5xx)
 		if isErrorStatusCode(resp.StatusCode) {
 			negativeTTL := p.config.Cache.GetNegativeTTL()
@@ -589,7 +589,7 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	} else {
 		cacheStatus = "" // Non-cacheable requests don't have cache status
 	}
-	
+
 	newResp := http.Response{
 		StatusCode:    resp.StatusCode,
 		Proto:         resp.Proto,
@@ -599,7 +599,7 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		Body:          io.NopCloser(bytes.NewReader(body)),
 		ContentLength: int64(len(body)),
 	}
-	
+
 	if err := newResp.Write(tlsConn); err != nil {
 		p.logger.Error("failed to write https response", "error", err)
 		// Log access for write error

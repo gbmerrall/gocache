@@ -30,10 +30,10 @@ func setupProxyWithTestServer(t *testing.T, cfg *config.Config) (*Proxy, *TestSe
 	if cfg == nil {
 		cfg = config.NewDefaultConfig()
 	}
-	
+
 	c := cache.NewMemoryCache(cfg.Cache.GetDefaultTTL(), cfg.Cache.MaxSizeMB)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	
+
 	p, err := NewProxy(logger, c, cfg)
 	if err != nil {
 		t.Fatalf("failed to create proxy: %v", err)
@@ -56,7 +56,7 @@ func setupProxyWithTestServer(t *testing.T, cfg *config.Config) (*Proxy, *TestSe
 	proxyURL, _ := url.Parse(proxyServer.URL)
 	caCertPool := x509.NewCertPool()
 	caCertPool.AddCert(p.GetCA())
-	
+
 	client := &http.Client{
 		Transport: &http.Transport{
 			Proxy: http.ProxyURL(proxyURL),
@@ -174,7 +174,7 @@ func TestNegativeTTLBehavior(t *testing.T) {
 	cfg := config.NewDefaultConfig()
 	cfg.Cache.DefaultTTL = "1h"
 	cfg.Cache.NegativeTTL = "100ms" // Short for testing
-	
+
 	_, testServer, client, cleanup := setupProxyWithTestServer(t, cfg)
 	defer cleanup()
 
@@ -647,7 +647,7 @@ func TestTTLExpiration(t *testing.T) {
 	// Configure very short TTL for testing
 	cfg := config.NewDefaultConfig()
 	cfg.Cache.DefaultTTL = "500ms" // Longer TTL for more reliable testing
-	
+
 	_, testServer, client, cleanup := setupProxyWithTestServer(t, cfg)
 	defer cleanup()
 
@@ -765,9 +765,9 @@ func TestTTLExpiration(t *testing.T) {
 func TestTTLExpirationVsNegativeTTL(t *testing.T) {
 	// Test that regular TTL and negative TTL work independently
 	cfg := config.NewDefaultConfig()
-	cfg.Cache.DefaultTTL = "300ms"   // Regular TTL
-	cfg.Cache.NegativeTTL = "100ms"  // Shorter negative TTL
-	
+	cfg.Cache.DefaultTTL = "300ms"  // Regular TTL
+	cfg.Cache.NegativeTTL = "100ms" // Shorter negative TTL
+
 	_, testServer, client, cleanup := setupProxyWithTestServer(t, cfg)
 	defer cleanup()
 
@@ -1119,10 +1119,10 @@ func TestHTTPVerbsCaching(t *testing.T) {
 				t.Errorf("expected second %s to have no X-Cache header, got X-Cache: %q", method, xCache2)
 			}
 
-			t.Logf("%s: First response X-Cache=%s, Second response X-Cache=%s", 
+			t.Logf("%s: First response X-Cache=%s, Second response X-Cache=%s",
 				method, xCache1, xCache2)
 			t.Logf("%s: Server received %d requests", method, testServer.GetRequestCount())
-			
+
 			// Verify that both requests reached the server (not cached)
 			if testServer.GetRequestCount() != 2 {
 				t.Errorf("expected %s method to not be cached, but server only received %d requests", method, testServer.GetRequestCount())

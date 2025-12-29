@@ -45,13 +45,13 @@ type CacheConfig struct {
 
 type LoggingConfig struct {
 	// Application logs (legacy fields kept for compatibility)
-	Level   string `toml:"level"`    // Deprecated: use AppLevel
-	File    string `toml:"file"`     // Deprecated: use AppLogfile
-	
+	Level string `toml:"level"` // Deprecated: use AppLevel
+	File  string `toml:"file"`  // Deprecated: use AppLogfile
+
 	// Application logs (new fields)
 	AppLevel   string `toml:"app_level"`
 	AppLogfile string `toml:"app_logfile"`
-	
+
 	// Access logs
 	AccessToStdout bool   `toml:"access_to_stdout"`
 	AccessLogfile  string `toml:"access_logfile"`
@@ -141,10 +141,10 @@ func NewDefaultConfig() *Config {
 			BindAddress: "127.0.0.1",
 		},
 		Cache: CacheConfig{
-			DefaultTTL:     "1h",
-			NegativeTTL:    "10s",
-			MaxSizeMB:      500,
-			IgnoreNoCache:  false,
+			DefaultTTL:    "1h",
+			NegativeTTL:   "10s",
+			MaxSizeMB:     500,
+			IgnoreNoCache: false,
 			CacheableTypes: []string{
 				"text/html",
 				"text/css",
@@ -163,7 +163,7 @@ func NewDefaultConfig() *Config {
 			// Legacy fields (kept for backward compatibility)
 			Level: "", // Application logging disabled by default
 			File:  "",
-			
+
 			// New logging configuration with proper defaults
 			AppLevel:       "", // Application logging disabled by default
 			AppLogfile:     "",
@@ -225,7 +225,7 @@ func LoadConfig(path string) (*Config, error) {
 			cfg.Logging.AppLevel = ""
 		}
 	}
-	
+
 	// Validate access format
 	cfg.Logging.AccessFormat = cfg.Logging.ValidateAccessFormat()
 

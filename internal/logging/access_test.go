@@ -321,7 +321,7 @@ func TestAccessLoggerInvalidFile(t *testing.T) {
 	errorHandler := func(err error) {
 		receivedError = err
 	}
-	
+
 	config := AccessLoggerConfig{
 		Format:        FormatHuman,
 		StdoutEnabled: false,
@@ -335,7 +335,7 @@ func TestAccessLoggerInvalidFile(t *testing.T) {
 		t.Errorf("NewAccessLogger should not return error for invalid file path, got: %v", err)
 	}
 	defer logger.Close()
-	
+
 	// Verify that an error was reported through the error handler
 	if receivedError == nil {
 		t.Error("expected error to be reported through error handler for invalid log file path")
