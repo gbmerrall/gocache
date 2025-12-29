@@ -3,6 +3,7 @@ package proxy
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -1128,5 +1129,75 @@ func TestHTTPVerbsCaching(t *testing.T) {
 				t.Errorf("expected %s method to not be cached, but server only received %d requests", method, testServer.GetRequestCount())
 			}
 		})
+	}
+}
+
+func TestProxyCertCacheEvictionIntegration(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-integration-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	// Create config with small cert cache limit
+	cfg := config.NewDefaultConfig()
+	cfg.Server.MaxCertCacheEntries = 5
+	cfg.Cache.DefaultTTL = "300s"
+	cfg.Cache.MaxSizeMB = 10
+
+	c := cache.NewMemoryCache(5*time.Minute, 10)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	proxy, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	// Test getCert directly for 20 unique domains
+	domains := []string{}
+	for i := 0; i < 20; i++ {
+		domains = append(domains, fmt.Sprintf("test%d.example.com", i))
+	}
+
+	for _, domain := range domains {
+		cert, err := proxy.getCert(domain)
+		if err != nil {
+			t.Fatalf("getCert(%s) failed: %v", domain, err)
+		}
+		if cert == nil {
+			t.Fatalf("getCert(%s) returned nil cert", domain)
+		}
+	}
+
+	// Verify cache size capped at 5
+	cacheSize, evictions := proxy.GetCertCacheMetrics()
+	if cacheSize != 5 {
+		t.Errorf("expected cache size 5, got %d", cacheSize)
+	}
+
+	// Verify evictions occurred
+	expectedEvictions := uint64(20 - 5)
+	if evictions != expectedEvictions {
+		t.Errorf("expected %d evictions, got %d", expectedEvictions, evictions)
+	}
+
+	// Access a cached domain repeatedly
+	cachedDomain := fmt.Sprintf("test%d.example.com", 19) // Most recent
+	for i := 0; i < 5; i++ {
+		_, err := proxy.getCert(cachedDomain)
+		if err != nil {
+			t.Fatalf("accessing cached cert failed: %v", err)
+		}
+	}
+
+	// Verify still cached (frequent access keeps it)
+	proxy.certCacheMu.RLock()
+	_, exists := proxy.certCache[cachedDomain]
+	proxy.certCacheMu.RUnlock()
+
+	if !exists {
+		t.Errorf("%s should still be cached after repeated access", cachedDomain)
 	}
 }
