@@ -1091,3 +1091,153 @@ func TestEvictOldestCertEmptyCache(t *testing.T) {
 		t.Errorf("expected 0 evictions, got %d", proxy.certEvictions.Load())
 	}
 }
+
+func TestGetCertCacheHitMovesToFront(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-cache-hit")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Server.MaxCertCacheEntries = 3
+	c := cache.NewMemoryCache(5*time.Minute, 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	proxy, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	// Get cert for host A (adds to cache, becomes front)
+	certA, err := proxy.getCert("a.example.com")
+	if err != nil {
+		t.Fatalf("getCert failed: %v", err)
+	}
+	if certA == nil {
+		t.Fatal("expected certificate, got nil")
+	}
+
+	// Get cert for host B (adds to cache, becomes front, pushing A back)
+	_, err = proxy.getCert("b.example.com")
+	if err != nil {
+		t.Fatalf("getCert failed: %v", err)
+	}
+
+	// Get cert for host C (adds to cache, becomes front)
+	_, err = proxy.getCert("c.example.com")
+	if err != nil {
+		t.Fatalf("getCert failed: %v", err)
+	}
+
+	// At this point: Front -> C -> B -> A <- Back
+	// Verify C is at front
+	if proxy.certLRUList.Front() != proxy.certCache["c.example.com"] {
+		t.Error("c.example.com should be at front")
+	}
+
+	// Access A again (cache hit, should move to front)
+	certA2, err := proxy.getCert("a.example.com")
+	if err != nil {
+		t.Fatalf("getCert cache hit failed: %v", err)
+	}
+	if certA2 != certA {
+		t.Error("cache hit should return same certificate")
+	}
+
+	// Verify A is now at front of LRU list
+	elemA := proxy.certCache["a.example.com"]
+	if proxy.certLRUList.Front() != elemA {
+		t.Error("cache hit should move entry to front of LRU list")
+	}
+}
+
+func TestGetCertEvictsWhenAtCapacity(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-evict-capacity")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Server.MaxCertCacheEntries = 3
+	c := cache.NewMemoryCache(5*time.Minute, 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	proxy, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	// Fill cache to capacity (3 entries)
+	_, err = proxy.getCert("a.example.com")
+	if err != nil {
+		t.Fatalf("getCert failed: %v", err)
+	}
+	_, err = proxy.getCert("b.example.com")
+	if err != nil {
+		t.Fatalf("getCert failed: %v", err)
+	}
+	_, err = proxy.getCert("c.example.com")
+	if err != nil {
+		t.Fatalf("getCert failed: %v", err)
+	}
+
+	// Verify cache is at capacity
+	if len(proxy.certCache) != 3 {
+		t.Fatalf("expected cache size 3, got %d", len(proxy.certCache))
+	}
+	if proxy.certLRUList.Len() != 3 {
+		t.Fatalf("expected LRU list length 3, got %d", proxy.certLRUList.Len())
+	}
+
+	// At this point: Front -> C -> B -> A <- Back (A is oldest)
+	// Verify A is at back
+	backNode := proxy.certLRUList.Back().Value.(*certNode)
+	if backNode.host != "a.example.com" {
+		t.Errorf("expected a.example.com at back, got %s", backNode.host)
+	}
+
+	// Add one more cert - should evict A (oldest)
+	_, err = proxy.getCert("d.example.com")
+	if err != nil {
+		t.Fatalf("getCert failed: %v", err)
+	}
+
+	// Verify cache still at capacity
+	if len(proxy.certCache) != 3 {
+		t.Fatalf("expected cache size 3, got %d", len(proxy.certCache))
+	}
+	if proxy.certLRUList.Len() != 3 {
+		t.Fatalf("expected LRU list length 3, got %d", proxy.certLRUList.Len())
+	}
+
+	// Verify A was evicted
+	if _, exists := proxy.certCache["a.example.com"]; exists {
+		t.Error("a.example.com should have been evicted")
+	}
+
+	// Verify B, C, D still exist
+	if _, exists := proxy.certCache["b.example.com"]; !exists {
+		t.Error("b.example.com should still exist")
+	}
+	if _, exists := proxy.certCache["c.example.com"]; !exists {
+		t.Error("c.example.com should still exist")
+	}
+	if _, exists := proxy.certCache["d.example.com"]; !exists {
+		t.Error("d.example.com should exist")
+	}
+
+	// Verify D is at front (most recent)
+	frontNode := proxy.certLRUList.Front().Value.(*certNode)
+	if frontNode.host != "d.example.com" {
+		t.Errorf("expected d.example.com at front, got %s", frontNode.host)
+	}
+
+	// Verify eviction counter incremented
+	if proxy.certEvictions.Load() != 1 {
+		t.Errorf("expected 1 eviction, got %d", proxy.certEvictions.Load())
+	}
+}

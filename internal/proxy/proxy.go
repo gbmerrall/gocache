@@ -639,10 +639,18 @@ func (p *Proxy) evictOldestCert() bool {
 }
 
 func (p *Proxy) getCert(host string) (*tls.Certificate, error) {
+	// Check cache with read lock
 	p.certCacheMu.RLock()
-	if elem, ok := p.certCache[host]; ok {
+	elem, found := p.certCache[host]
+	if found {
 		node := elem.Value.(*certNode)
 		p.certCacheMu.RUnlock()
+
+		// Upgrade to write lock to move to front
+		p.certCacheMu.Lock()
+		p.certLRUList.MoveToFront(elem)
+		p.certCacheMu.Unlock()
+
 		p.logger.Debug("certificate cache hit", "host", host)
 		return node.cert, nil
 	}
@@ -651,11 +659,15 @@ func (p *Proxy) getCert(host string) (*tls.Certificate, error) {
 
 	p.certCacheMu.Lock()
 	defer p.certCacheMu.Unlock()
+
+	// Double-check after acquiring write lock
 	if elem, ok := p.certCache[host]; ok {
 		node := elem.Value.(*certNode)
+		p.certLRUList.MoveToFront(elem)
 		return node.cert, nil
 	}
 
+	// Generate new certificate
 	hostCert, hostKey, err := cert.GenerateHostCert(p.ca, p.caPrivKey, host)
 	if err != nil {
 		p.logger.Debug("certificate generation failed", "host", host, "error", err)
@@ -668,11 +680,18 @@ func (p *Proxy) getCert(host string) (*tls.Certificate, error) {
 		PrivateKey:  hostKey,
 	}
 
+	// Evict if at capacity
+	maxEntries := p.config.Server.MaxCertCacheEntries
+	if maxEntries > 0 && len(p.certCache) >= maxEntries {
+		p.evictOldestCert()
+	}
+
+	// Add new cert to front (most recent)
 	node := &certNode{
 		host: host,
 		cert: tlsCert,
 	}
-	elem := p.certLRUList.PushFront(node)
+	elem = p.certLRUList.PushFront(node)
 	p.certCache[host] = elem
 	p.logger.Debug("certificate cached", "host", host, "cacheSize", len(p.certCache))
 	return tlsCert, nil
