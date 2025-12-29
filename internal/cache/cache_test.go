@@ -484,3 +484,44 @@ func TestMemoryCache_UnlimitedCache(t *testing.T) {
 		t.Errorf("Expected 0 evictions with unlimited cache, got %d", stats.Evictions)
 	}
 }
+
+func TestMemoryCache_ConcurrentAccess(t *testing.T) {
+	cache := NewMemoryCache(1*time.Hour, 10) // 10MB limit
+	defer cache.Shutdown()
+
+	var wg sync.WaitGroup
+	numGoroutines := 10
+	numOpsPerGoroutine := 100
+
+	// Concurrent writers
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < numOpsPerGoroutine; j++ {
+				key := fmt.Sprintf("key-%d-%d", id, j)
+				cache.Set(key, CacheEntry{Body: []byte("data")})
+			}
+		}(i)
+	}
+
+	// Concurrent readers
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < numOpsPerGoroutine; j++ {
+				key := fmt.Sprintf("key-%d-%d", id, j)
+				cache.Get(key)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Should not crash or deadlock
+	stats := cache.GetStats()
+	if stats.EntryCount < 0 {
+		t.Error("Invalid entry count")
+	}
+}
