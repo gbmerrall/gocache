@@ -23,6 +23,7 @@ Here is an example `gocache.toml` file with all available options:
 proxy_port = 8080
 control_port = 8081
 bind_address = "127.0.0.1"
+max_cert_cache_entries = 1000
 
 [cache]
 default_ttl = "1h"
@@ -66,11 +67,12 @@ auto_save_interval = "5m"
 
 ### `[server]`
 
-| Key            | Type   | Default     | Description                                                                                             |
-| -------------- | ------ | ----------- | ------------------------------------------------------------------------------------------------------- |
-| `proxy_port`   | Integer| 8080        | The port for the main caching proxy server.                                                             |
-| `control_port` | Integer| 8081        | The port for the Control API server.                                                                    |
-| `bind_address` | String | "127.0.0.1" | The IP address to bind both servers to. **For security, the Control API only binds to localhost.**      |
+| Key                      | Type    | Default     | Description                                                                                             |
+| ------------------------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------- |
+| `proxy_port`             | Integer | 8080        | The port for the main caching proxy server.                                                             |
+| `control_port`           | Integer | 8081        | The port for the Control API server.                                                                    |
+| `bind_address`           | String  | "127.0.0.1" | The IP address to bind both servers to. **For security, the Control API only binds to localhost.**      |
+| `max_cert_cache_entries` | Integer | 1000        | Maximum number of TLS certificates to cache. Each certificate is ~1-2KB. Set to 0 for unlimited (not recommended for production). |
 
 ### `[cache]`
 
