@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1239,5 +1240,159 @@ func TestGetCertEvictsWhenAtCapacity(t *testing.T) {
 	// Verify eviction counter incremented
 	if proxy.certEvictions.Load() != 1 {
 		t.Errorf("expected 1 eviction, got %d", proxy.certEvictions.Load())
+	}
+}
+
+func TestGetCertUnlimitedCache(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-unlimited")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Server.MaxCertCacheEntries = 0 // Unlimited
+	c := cache.NewMemoryCache(5*time.Minute, 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	proxy, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	// Add 100 certs (way more than typical limit)
+	for i := 0; i < 100; i++ {
+		host := fmt.Sprintf("host%d.example.com", i)
+		_, err := proxy.getCert(host)
+		if err != nil {
+			t.Fatalf("getCert(%s) failed: %v", host, err)
+		}
+	}
+
+	// Verify all 100 cached (no evictions)
+	if len(proxy.certCache) != 100 {
+		t.Errorf("expected 100 certs, got %d", len(proxy.certCache))
+	}
+	if proxy.certEvictions.Load() != 0 {
+		t.Errorf("expected 0 evictions with unlimited cache, got %d", proxy.certEvictions.Load())
+	}
+}
+
+func TestGetCertConcurrentAccess(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-concurrent")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Server.MaxCertCacheEntries = 50
+	c := cache.NewMemoryCache(5*time.Minute, 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	proxy, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	// Spawn 10 goroutines each requesting 100 certs
+	var wg sync.WaitGroup
+	errs := make(chan error, 10)
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				// Mix of duplicate and unique hosts
+				host := fmt.Sprintf("host%d.example.com", j%80)
+				_, err := proxy.getCert(host)
+				if err != nil {
+					errs <- fmt.Errorf("goroutine %d: %w", id, err)
+					return
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errs)
+
+	// Check for errors
+	for err := range errs {
+		t.Error(err)
+	}
+
+	// Verify cache size at limit
+	if len(proxy.certCache) > 50 {
+		t.Errorf("cache size %d exceeds limit 50", len(proxy.certCache))
+	}
+
+	// Verify evictions occurred
+	if proxy.certEvictions.Load() == 0 {
+		t.Error("expected evictions with concurrent access")
+	}
+
+	t.Logf("Final cache size: %d, evictions: %d", len(proxy.certCache), proxy.certEvictions.Load())
+}
+
+func TestGetCertAccessUpdatesLRU(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-lru-update")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Server.MaxCertCacheEntries = 3
+	c := cache.NewMemoryCache(5*time.Minute, 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	proxy, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	// Fill cache: A, B, C (A is oldest)
+	_, err = proxy.getCert("a.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = proxy.getCert("b.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = proxy.getCert("c.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Access A (moves to front)
+	_, err = proxy.getCert("a.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add D (should evict B, not A)
+	_, err = proxy.getCert("d.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify A, C, D remain; B evicted
+	if _, exists := proxy.certCache["a.example.com"]; !exists {
+		t.Error("a.example.com should remain (was accessed)")
+	}
+	if _, exists := proxy.certCache["b.example.com"]; exists {
+		t.Error("b.example.com should be evicted (oldest)")
+	}
+	if _, exists := proxy.certCache["c.example.com"]; !exists {
+		t.Error("c.example.com should remain")
+	}
+	if _, exists := proxy.certCache["d.example.com"]; !exists {
+		t.Error("d.example.com should be added")
 	}
 }
