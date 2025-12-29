@@ -20,11 +20,8 @@ These issues represent memory leaks or critical stability risks that must be add
         - Enforce strict size limits in `Set()` operations.
         - Track current size incrementally to ensure `GetStats` is O(1).
     - **Status:** ✅ Completed - Full LRU implementation with size enforcement, background cleanup, and comprehensive tests
-- [ ] **Implement Certificate Cache Eviction**
-    - **Issue:** `certCache` in `proxy.go` grows indefinitely with every unique hostname accessed (e.g., during scraping).
-    - **Action:**
-        - Implement LRU or TTL-based eviction for the certificate map.
-        - Add `cert_cache_max_size` configuration option.
+- [x] **Implement Certificate Cache Eviction**
+    - **Status:** ✅ Completed - Full LRU implementation with entry count limit, comprehensive tests
 
 ## 🔥 Priority 1: High (Immediate Technical Debt)
 
