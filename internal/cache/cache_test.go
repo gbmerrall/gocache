@@ -417,3 +417,70 @@ func TestMemoryCache_LRUOrder(t *testing.T) {
 		t.Error("Expected key4 to exist")
 	}
 }
+
+func TestMemoryCache_SizeEnforcement(t *testing.T) {
+	cache := NewMemoryCache(1*time.Hour, 1) // 1MB limit
+	defer cache.Shutdown()
+
+	// Add entry that fills cache
+	data := make([]byte, 600*1024) // 600KB
+	cache.Set("key1", CacheEntry{Body: data})
+
+	stats := cache.GetStats()
+	if stats.TotalSize != 600*1024 {
+		t.Errorf("Expected size %d, got %d", 600*1024, stats.TotalSize)
+	}
+
+	// Add another entry - should evict key1 (600KB + 600KB > 1MB)
+	cache.Set("key2", CacheEntry{Body: data})
+
+	_, found := cache.Get("key1")
+	if found {
+		t.Error("Expected key1 to be evicted")
+	}
+
+	stats = cache.GetStats()
+	if stats.Evictions != 1 {
+		t.Errorf("Expected 1 eviction, got %d", stats.Evictions)
+	}
+}
+
+func TestMemoryCache_OversizedEntryRejection(t *testing.T) {
+	cache := NewMemoryCache(1*time.Hour, 1) // 1MB limit
+	defer cache.Shutdown()
+
+	// Try to add entry larger than max size
+	largeData := make([]byte, 2*1024*1024) // 2MB
+	cache.Set("key1", CacheEntry{Body: largeData})
+
+	// Entry should be rejected
+	_, found := cache.Get("key1")
+	if found {
+		t.Error("Expected oversized entry to be rejected")
+	}
+
+	stats := cache.GetStats()
+	if stats.EntryCount != 0 {
+		t.Errorf("Expected 0 entries, got %d", stats.EntryCount)
+	}
+}
+
+func TestMemoryCache_UnlimitedCache(t *testing.T) {
+	cache := NewMemoryCache(1*time.Hour, 0) // Unlimited
+	defer cache.Shutdown()
+
+	// Add many entries
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("key%d", i)
+		data := make([]byte, 1024*1024) // 1MB each
+		cache.Set(key, CacheEntry{Body: data})
+	}
+
+	stats := cache.GetStats()
+	if stats.EntryCount != 100 {
+		t.Errorf("Expected 100 entries, got %d", stats.EntryCount)
+	}
+	if stats.Evictions != 0 {
+		t.Errorf("Expected 0 evictions with unlimited cache, got %d", stats.Evictions)
+	}
+}
