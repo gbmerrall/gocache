@@ -1001,3 +1001,93 @@ func TestNewProxyInitializesCertLRU(t *testing.T) {
 		t.Fatalf("expected empty LRU list, got %d entries", proxy.certLRUList.Len())
 	}
 }
+
+func TestEvictOldestCert(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-evict")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Server.MaxCertCacheEntries = 3
+	c := cache.NewMemoryCache(5*time.Minute, 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	proxy, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	// Manually add 3 certs to cache (newest to oldest: C, B, A)
+	// Using PushFront means: C is most recent (front), A is oldest (back)
+	certA := &tls.Certificate{}
+	certB := &tls.Certificate{}
+	certC := &tls.Certificate{}
+
+	nodeA := &certNode{host: "a.example.com", cert: certA}
+	nodeB := &certNode{host: "b.example.com", cert: certB}
+	nodeC := &certNode{host: "c.example.com", cert: certC}
+
+	elemA := proxy.certLRUList.PushFront(nodeA)
+	elemB := proxy.certLRUList.PushFront(nodeB)
+	elemC := proxy.certLRUList.PushFront(nodeC)
+
+	proxy.certCache["a.example.com"] = elemA
+	proxy.certCache["b.example.com"] = elemB
+	proxy.certCache["c.example.com"] = elemC
+
+	// Evict oldest (A)
+	evicted := proxy.evictOldestCert()
+	if !evicted {
+		t.Fatal("expected eviction to succeed")
+	}
+
+	// Verify A removed, B and C remain
+	if _, exists := proxy.certCache["a.example.com"]; exists {
+		t.Error("a.example.com should be evicted")
+	}
+	if _, exists := proxy.certCache["b.example.com"]; !exists {
+		t.Error("b.example.com should still exist")
+	}
+	if _, exists := proxy.certCache["c.example.com"]; !exists {
+		t.Error("c.example.com should still exist")
+	}
+
+	// Verify eviction counter incremented
+	if proxy.certEvictions.Load() != 1 {
+		t.Errorf("expected 1 eviction, got %d", proxy.certEvictions.Load())
+	}
+
+	// Verify list size
+	if proxy.certLRUList.Len() != 2 {
+		t.Errorf("expected LRU list length 2, got %d", proxy.certLRUList.Len())
+	}
+}
+
+func TestEvictOldestCertEmptyCache(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-evict-empty")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	cfg := config.NewDefaultConfig()
+	c := cache.NewMemoryCache(5*time.Minute, 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	proxy, err := NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	evicted := proxy.evictOldestCert()
+	if evicted {
+		t.Error("should not evict from empty cache")
+	}
+	if proxy.certEvictions.Load() != 0 {
+		t.Errorf("expected 0 evictions, got %d", proxy.certEvictions.Load())
+	}
+}

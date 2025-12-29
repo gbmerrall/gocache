@@ -622,6 +622,22 @@ func (p *Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// evictOldestCert removes the least recently used certificate.
+// Must be called with certCacheMu write lock held.
+// Returns true if an entry was evicted, false if cache was empty.
+func (p *Proxy) evictOldestCert() bool {
+	elem := p.certLRUList.Back() // Tail = oldest
+	if elem == nil {
+		return false // Empty cache
+	}
+
+	node := elem.Value.(*certNode)
+	p.certLRUList.Remove(elem)
+	delete(p.certCache, node.host)
+	p.certEvictions.Add(1)
+	return true
+}
+
 func (p *Proxy) getCert(host string) (*tls.Certificate, error) {
 	p.certCacheMu.RLock()
 	if elem, ok := p.certCache[host]; ok {
