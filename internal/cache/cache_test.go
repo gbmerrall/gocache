@@ -568,3 +568,52 @@ func TestMemoryCache_Shutdown(t *testing.T) {
 	// Verify cleanup goroutine stopped (no way to directly test, but Shutdown should return)
 	// If it blocks, test will timeout
 }
+
+func TestMemoryCache_PersistenceWithLRU(t *testing.T) {
+	tmpfile := filepath.Join(t.TempDir(), "cache.gob")
+
+	// Create cache and add entries
+	cache1 := NewMemoryCache(1*time.Hour, 10)
+	defer cache1.Shutdown()
+
+	cache1.Set("key1", CacheEntry{
+		StatusCode: 200,
+		Body:       []byte("data1"),
+		Headers:    http.Header{"Content-Type": []string{"text/plain"}},
+	})
+	cache1.Set("key2", CacheEntry{
+		StatusCode: 200,
+		Body:       []byte("data2"),
+	})
+
+	// Save
+	if err := cache1.SaveToFile(tmpfile); err != nil {
+		t.Fatalf("Failed to save: %v", err)
+	}
+
+	// Load into new cache
+	cache2 := NewMemoryCache(1*time.Hour, 10)
+	defer cache2.Shutdown()
+
+	if err := cache2.LoadFromFile(tmpfile); err != nil {
+		t.Fatalf("Failed to load: %v", err)
+	}
+
+	// Verify entries exist
+	entry1, found1 := cache2.Get("key1")
+	if !found1 || string(entry1.Body) != "data1" {
+		t.Error("key1 not loaded correctly")
+	}
+
+	entry2, found2 := cache2.Get("key2")
+	if !found2 || string(entry2.Body) != "data2" {
+		t.Error("key2 not loaded correctly")
+	}
+
+	// Verify size tracking
+	stats := cache2.GetStats()
+	expectedSize := int64(len("data1") + len("data2"))
+	if stats.TotalSize != expectedSize {
+		t.Errorf("Expected size %d, got %d", expectedSize, stats.TotalSize)
+	}
+}
