@@ -12,7 +12,7 @@ import (
 
 func TestMemoryCache(t *testing.T) {
 	t.Run("Set and Get", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute, 0)
+		c := NewMemoryCache(1*time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("hello"),
@@ -29,7 +29,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("Get expired", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Millisecond, 0)
+		c := NewMemoryCache(1*time.Millisecond, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("world"),
@@ -45,7 +45,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("Get non-existent", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute, 0)
+		c := NewMemoryCache(1*time.Minute, 0)
 		_, ok := c.Get("nonexistent")
 		if ok {
 			t.Fatal("expected not to find non-existent key")
@@ -53,7 +53,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("UpdateTTL", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Hour, 0)
+		c := NewMemoryCache(1*time.Hour, 0)
 		newTTL := 2 * time.Hour
 		c.UpdateTTL(newTTL)
 
@@ -74,7 +74,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("PurgeAll", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute, 0)
+		c := NewMemoryCache(1*time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("test"),
@@ -98,7 +98,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("PurgeByURL", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute, 0)
+		c := NewMemoryCache(1*time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("test"),
@@ -122,7 +122,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("PurgeByDomain", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute, 0)
+		c := NewMemoryCache(1*time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("test"),
@@ -151,7 +151,7 @@ func TestMemoryCache(t *testing.T) {
 	})
 
 	t.Run("ConcurrentAccess", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute, 0)
+		c := NewMemoryCache(1*time.Minute, 0)
 		var wg sync.WaitGroup
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
@@ -194,7 +194,7 @@ func TestCachePersistence(t *testing.T) {
 	cacheFile := filepath.Join(tmpDir, "cache.gob")
 
 	t.Run("SaveToFile", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute, 0)
+		c := NewMemoryCache(1*time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Headers:    http.Header{"Content-Type": []string{"text/plain"}},
@@ -214,7 +214,7 @@ func TestCachePersistence(t *testing.T) {
 	})
 
 	t.Run("LoadFromFile", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute, 0)
+		c := NewMemoryCache(1*time.Minute, 0)
 		err := c.LoadFromFile(cacheFile)
 		if err != nil {
 			t.Fatalf("failed to load cache: %v", err)
@@ -233,7 +233,7 @@ func TestCachePersistence(t *testing.T) {
 	})
 
 	t.Run("LoadFromNonExistentFile", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute, 0)
+		c := NewMemoryCache(1*time.Minute, 0)
 		err := c.LoadFromFile("nonexistent.gob")
 		if err == nil {
 			t.Error("expected error loading non-existent file")
@@ -241,7 +241,7 @@ func TestCachePersistence(t *testing.T) {
 	})
 
 	t.Run("SaveToFileWithDirectoryCreation", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Minute, 0)
+		c := NewMemoryCache(1*time.Minute, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusOK,
 			Body:       []byte("test"),
@@ -261,7 +261,7 @@ func TestCachePersistence(t *testing.T) {
 }
 
 func TestCacheStats(t *testing.T) {
-	c := NewMemoryCache(1 * time.Minute, 0)
+	c := NewMemoryCache(1*time.Minute, 0)
 	entry := CacheEntry{
 		StatusCode: http.StatusOK,
 		Body:       []byte("stats test"),
@@ -299,16 +299,16 @@ func TestCacheStats(t *testing.T) {
 
 func TestSetWithTTL(t *testing.T) {
 	t.Run("SetWithTTL custom duration", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Hour, 0) // Default TTL of 1 hour
+		c := NewMemoryCache(1*time.Hour, 0) // Default TTL of 1 hour
 		entry := CacheEntry{
 			StatusCode: http.StatusNotFound,
 			Body:       []byte("error response"),
 		}
-		
+
 		// Set with custom TTL (negative TTL for error)
 		customTTL := 5 * time.Second
 		c.SetWithTTL("error-key", entry, customTTL)
-		
+
 		// Should be available immediately
 		got, ok := c.Get("error-key")
 		if !ok {
@@ -317,55 +317,55 @@ func TestSetWithTTL(t *testing.T) {
 		if string(got.Body) != "error response" {
 			t.Errorf("got body %q, want %q", got.Body, "error response")
 		}
-		
+
 		// Should expire based on custom TTL, not default
 		expectedExpiry := time.Now().Add(customTTL)
 		if got.Expiry.After(expectedExpiry.Add(1*time.Second)) || got.Expiry.Before(expectedExpiry.Add(-1*time.Second)) {
 			t.Errorf("expiry time %v not close to expected %v", got.Expiry, expectedExpiry)
 		}
 	})
-	
+
 	t.Run("SetWithTTL expiration", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Hour, 0)
+		c := NewMemoryCache(1*time.Hour, 0)
 		entry := CacheEntry{
 			StatusCode: http.StatusInternalServerError,
 			Body:       []byte("server error"),
 		}
-		
+
 		// Set with very short TTL
 		c.SetWithTTL("short-ttl-key", entry, 2*time.Millisecond)
-		
+
 		// Wait for expiration
 		time.Sleep(5 * time.Millisecond)
-		
+
 		// Should be expired
 		_, ok := c.Get("short-ttl-key")
 		if ok {
 			t.Fatal("expected short-ttl-key to be expired")
 		}
 	})
-	
+
 	t.Run("SetWithTTL vs Set comparison", func(t *testing.T) {
-		c := NewMemoryCache(1 * time.Hour, 0)
+		c := NewMemoryCache(1*time.Hour, 0)
 		entry1 := CacheEntry{StatusCode: http.StatusOK, Body: []byte("normal")}
 		entry2 := CacheEntry{StatusCode: http.StatusNotFound, Body: []byte("error")}
-		
+
 		// Set normal entry with default TTL
 		c.Set("normal-key", entry1)
-		
+
 		// Set error entry with custom short TTL
 		c.SetWithTTL("error-key", entry2, 10*time.Millisecond)
-		
+
 		// Both should be available initially
 		_, ok1 := c.Get("normal-key")
 		_, ok2 := c.Get("error-key")
 		if !ok1 || !ok2 {
 			t.Fatal("both entries should be available initially")
 		}
-		
+
 		// Wait for short TTL to expire
 		time.Sleep(15 * time.Millisecond)
-		
+
 		// Normal entry should still be available, error entry should be expired
 		_, ok1 = c.Get("normal-key")
 		_, ok2 = c.Get("error-key")
@@ -376,4 +376,44 @@ func TestSetWithTTL(t *testing.T) {
 			t.Error("error entry should be expired")
 		}
 	})
+}
+
+func TestMemoryCache_LRUOrder(t *testing.T) {
+	cache := NewMemoryCache(1*time.Hour, 10) // 10MB limit
+	defer cache.Shutdown()
+
+	// Add three entries
+	cache.Set("key1", CacheEntry{Body: []byte("data1")})
+	cache.Set("key2", CacheEntry{Body: []byte("data2")})
+	cache.Set("key3", CacheEntry{Body: []byte("data3")})
+
+	// Access key1 to make it most recent
+	cache.Get("key1")
+
+	// Access key2 to make it most recent
+	cache.Get("key2")
+
+	// Now order should be: key2 (front), key1, key3 (back)
+	// Add large entry to force eviction - key3 should be evicted
+	largeData := make([]byte, 10*1024*1024) // 10MB
+	cache.Set("key4", CacheEntry{Body: largeData})
+
+	// key3 should be evicted (least recently used)
+	_, found := cache.Get("key3")
+	if found {
+		t.Error("Expected key3 to be evicted")
+	}
+
+	// key1 and key2 should be evicted too (not enough space)
+	_, found1 := cache.Get("key1")
+	_, found2 := cache.Get("key2")
+	if found1 || found2 {
+		t.Error("Expected key1 and key2 to be evicted")
+	}
+
+	// key4 should exist
+	_, found4 := cache.Get("key4")
+	if !found4 {
+		t.Error("Expected key4 to exist")
+	}
 }
