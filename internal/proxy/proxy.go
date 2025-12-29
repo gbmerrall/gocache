@@ -109,6 +109,15 @@ func (p *Proxy) GetCertCacheStats() int {
 	return len(p.certCache)
 }
 
+// GetCertCacheMetrics returns the cert cache size and eviction count.
+func (p *Proxy) GetCertCacheMetrics() (int, uint64) {
+	p.certCacheMu.RLock()
+	size := len(p.certCache)
+	p.certCacheMu.RUnlock()
+	evictions := p.certEvictions.Load()
+	return size, evictions
+}
+
 // SetConfig updates the proxy's configuration.
 func (p *Proxy) SetConfig(cfg *config.Config) {
 	p.config = cfg

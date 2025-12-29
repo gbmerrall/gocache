@@ -485,3 +485,51 @@ func TestHandleHealthDetailed(t *testing.T) {
 		t.Error("health response should contain status field")
 	}
 }
+
+func TestStatsIncludesCertCacheMetrics(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gocache-test-control")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cert.SetCertDir(tmpDir)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Server.MaxCertCacheEntries = 100
+
+	c := cache.NewMemoryCache(5*time.Minute, 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	proxy, err := proxy.NewProxy(logger, c, cfg)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+
+	api := NewControlAPI(logger, cfg, c, proxy, func() {})
+
+	req := httptest.NewRequest("GET", "/stats", nil)
+	rec := httptest.NewRecorder()
+
+	api.handleStats(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var stats map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&stats); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Check cert cache metrics present
+	if _, ok := stats["cert_cache_size"]; !ok {
+		t.Error("missing cert_cache_size metric")
+	}
+	if _, ok := stats["cert_cache_evictions"]; !ok {
+		t.Error("missing cert_cache_evictions metric")
+	}
+	if _, ok := stats["cert_cache_max_entries"]; !ok {
+		t.Error("missing cert_cache_max_entries metric")
+	}
+}

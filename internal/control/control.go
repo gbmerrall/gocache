@@ -136,14 +136,22 @@ func (a *ControlAPI) handleStats(w http.ResponseWriter, r *http.Request) {
 	if totalRequests > 0 {
 		hitRate = (float64(stats.Hits) / float64(totalRequests)) * 100
 	}
+
+	// Get cert cache stats
+	certCacheSize, certEvictions := a.proxy.GetCertCacheMetrics()
+	certMaxEntries := a.config.Server.MaxCertCacheEntries
+
 	response := map[string]interface{}{
-		"hit_count":        stats.Hits,
-		"miss_count":       stats.Misses,
-		"hit_rate_percent": fmt.Sprintf("%.2f", hitRate),
-		"entry_count":      stats.EntryCount,
-		"uptime_seconds":   fmt.Sprintf("%.2f", stats.UptimeSeconds),
-		"cache_size_bytes": stats.TotalSize,
-		"cert_cache_count": a.proxy.GetCertCacheStats(),
+		"hit_count":              stats.Hits,
+		"miss_count":             stats.Misses,
+		"hit_rate_percent":       fmt.Sprintf("%.2f", hitRate),
+		"entry_count":            stats.EntryCount,
+		"uptime_seconds":         fmt.Sprintf("%.2f", stats.UptimeSeconds),
+		"cache_size_bytes":       stats.TotalSize,
+		"cert_cache_count":       a.proxy.GetCertCacheStats(),
+		"cert_cache_size":        certCacheSize,
+		"cert_cache_evictions":   certEvictions,
+		"cert_cache_max_entries": certMaxEntries,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
