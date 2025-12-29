@@ -648,7 +648,10 @@ func (p *Proxy) getCert(host string) (*tls.Certificate, error) {
 
 		// Upgrade to write lock to move to front
 		p.certCacheMu.Lock()
-		p.certLRUList.MoveToFront(elem)
+		// Re-verify element still in cache after lock upgrade
+		if currentElem, stillExists := p.certCache[host]; stillExists && currentElem == elem {
+			p.certLRUList.MoveToFront(elem)
+		}
 		p.certCacheMu.Unlock()
 
 		p.logger.Debug("certificate cache hit", "host", host)
